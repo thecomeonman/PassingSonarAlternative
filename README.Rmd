@@ -1,0 +1,1310 @@
+---
+title: "An Alternative to Pass Sonars"
+author: "Aditya Kothari"
+date: "August 2019"
+output: md_document
+---
+
+The <a href = "https://statsbomb.com/2019/07/a-sneak-peak-at-iq-tactics-a-brief-history-of-radials-sonars-wagon-wheels-in-soccer/">Statsbomb article on passing sonars</a> prominently featured the below template -
+
+![](https://i2.wp.com/statsbomb.com/wp-content/uploads/2019/07/Pass_Sonar_LionelMessi_La-Liga_2018_2019.png?resize=1024%2C907&ssl=1)
+
+### I have three issues with this design
+
+- The spoke of the wheel is able to communicate only one aggregated value for the length of the passes and the accuracy of the passes. By combining all the passes that were made in that angle bucket into one accuracy and one length number we lose out on a more granular view of the passes.
+
+- There is no indication of how many passes belong to a particular sonar or spoke. Spokes with very few passes would visually get as much attention as spokes with many passes which could lead to misinterpreting the typical length or the typical success percent.
+
+- Note how the spoke expands in width as it moves farther from the centre. This means that the longer the pass, the more area is covered by the respective spoke. For a short pass to belong to a particular spoke, it would have to fall in a far smaller region than for a long pass to belong to the same spoke. When looking at a sonar without consciously being aware of it, This may lead to misleading inferences.
+
+### With the design below, I try to solve these problems with some more minor enhancements
+
+- Think of the chart as a bunch of concentric rings. Each ring captures passes falling within a particular range of length. Each block in the ring captures passes of the respective lengths in a paritcular range of direction The blocks have been calculated in such a way to cover approximately the same sized area of the pitch as any other block, which is why each block covers a lesser part of the circumference on passes of longer lengths compared to the part of the circumference it covers on passes of shorter lengths. ( this logic needs improvement for more equivalent blocks but the philosophy is that )
+
+- The radius of the circle in the background of each sonar is proportional to the length of the pitch. You can use that as a reference to get an idea of how long a pass actually was.
+
+- The thickness of each block in the ring is proportional to the number of passes of that length and angle. ( It's actuallly proportional to the square root of the number of passes, if I make it proportional then the blocks with few passes become too small to be visible. )
+
+- The colour of each block is proportional to the success percent of the passes associated with that block, going from red to dark green for 0% to 100%
+
+- In the pitch break up, each sonar is constructed the same way as the above but captures only passes originating from that area.
+
+### How the problems get solved
+
+- Since we removed the spoke concept and implemented rings and blocks instead, we have some break up between passes of various length. Given that passes of different lengths are represented differently, we also get a better idea of accuracies across different pass lengths.
+
+- Each block gives a visual cue about the number of passes falling in that length, direction combination.
+
+- Each block is calculated in such a way that it covers approximately the same area as all other blocks which allows us to compare blocks and get an idea of which parts of the pitch received more passes and which parts received less.
+
+
+```{r Setup, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+rm(list = ls())
+library(data.table)
+library(png)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(gtable)
+library(scales)
+
+nLocation2Size = 80
+nLocation1Size = 120
+
+```
+
+```{r ChartFunctions, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+# Adds pitch markings, green background, etc. for plot background to look like
+# a football pitch.
+fAddPitchLines = function (
+   plotObject,
+   nXLimit = 105,
+   nYLimit = 68,
+   cLineColour = 'white',
+   cPitchColour = '#038253'
+) {
+
+   nPenaltyAreaLength_m = nXLimit * 16.5 / 105
+   nPenaltyAreaWidth_m = nYLimit * 40 / 68
+   nSixYardBoxLength_m = nXLimit * 5.5 / 105
+   nSixYardBoxWidth_m = nYLimit * 18 / 68
+   nCentreCircleRadius_m = nXLimit * 9.15 / 105
+   nPenaltySpotOffset_m = nXLimit * 11 / 105
+   nCornerArcRadius_m = nXLimit * 1 / 105
+
+   dtCentreCircle = data.table(
+      Angle_rad = seq(
+         0,
+         2*pi,
+         0.01
+      )
+   )[,
+      x := ( 
+         nCentreCircleRadius_m * sin(Angle_rad)
+      ) + ( nXLimit / 2 )
+   ][,
+      y := ( 
+         nCentreCircleRadius_m * cos(Angle_rad)
+      ) + ( 
+         nYLimit / 2
+      )
+   ]
+
+   dtCornerArc = data.table(
+      Angle_rad = seq(
+         0,
+         pi/2,
+         0.01
+      )
+   )[,
+      x := ( 
+         nCornerArcRadius_m * sin(Angle_rad)
+      )
+   ][,
+      y := ( 
+         nCornerArcRadius_m * cos(Angle_rad)
+      )
+   ]
+
+   
+   plotObject = plotObject +
+      # background
+      geom_rect(
+         aes(
+            xmin = 0 - 5, 
+            ymin = 0 - 5,
+            xmax = nXLimit + 5,
+            ymax = nYLimit + 5
+         ),
+         fill = cPitchColour
+      ) +
+      # pitch
+      geom_rect(
+         aes(
+            xmin = 0, 
+            ymin = 0,
+            xmax = nXLimit,
+            ymax = nYLimit
+         ),
+         fill = cPitchColour,
+         color = cLineColour
+      ) +
+      # D defense 
+      geom_polygon(
+         data = dtCentreCircle,
+         aes(
+            x = x - ( nXLimit / 2) + nPenaltySpotOffset_m,
+            y = y
+         ),
+         color = cLineColour,
+         fill = cPitchColour
+      ) +
+      # D offense 
+      geom_polygon(
+         data = dtCentreCircle,
+         aes(
+            x = x + ( nXLimit / 2) - nPenaltySpotOffset_m,
+            y = y
+         ),
+         color = cLineColour,
+         fill = cPitchColour
+      ) +
+      # penalty box defense
+      geom_rect(
+         aes(
+            ymin = ( nYLimit / 2 ) - ( nPenaltyAreaWidth_m / 2 ), 
+            ymax = ( nYLimit / 2 ) + ( nPenaltyAreaWidth_m / 2 ),
+            xmin = 0,
+            xmax = nPenaltyAreaLength_m
+         ),
+         # alpha = 0,
+         color = cLineColour,
+         fill = cPitchColour
+      ) +
+      # penalty box attack
+      geom_rect(
+         aes(
+            ymin = ( nYLimit / 2 ) - ( nPenaltyAreaWidth_m / 2 ), 
+            ymax = ( nYLimit / 2 ) + ( nPenaltyAreaWidth_m / 2 ),
+            xmin = nXLimit,
+            xmax = nXLimit - nPenaltyAreaLength_m
+         ),
+         # alpha = 0,
+         color = cLineColour,
+         fill = cPitchColour
+      ) +
+      # six yard box defense
+      geom_rect(
+         aes(
+            ymin = ( nYLimit / 2 ) - ( nSixYardBoxWidth_m / 2 ), 
+            ymax = ( nYLimit / 2 ) + ( nSixYardBoxWidth_m / 2 ),
+            xmin = 0,
+            xmax = nSixYardBoxLength_m
+         ),
+         # alpha = 0,
+         color = cLineColour,
+         fill = cPitchColour
+      ) +
+      # six yard attack
+      geom_rect(
+         aes(
+            ymin = ( nYLimit / 2 ) - ( nSixYardBoxWidth_m / 2 ), 
+            ymax = ( nYLimit / 2 ) + ( nSixYardBoxWidth_m / 2 ),
+            xmin = nXLimit,
+            xmax = nXLimit - nSixYardBoxLength_m
+         ),
+         # alpha = 0,
+         color = cLineColour,
+         fill = cPitchColour
+      ) +
+      # centre circle
+      # this doesn't work, size changes with plot size
+      # geom_point(
+      #    aes(x = nXLimit / 2, y = nYLimit / 2),
+      #    size = 30, 
+      #    shape = 1, 
+      #    color = "white"
+      # ) +
+      # penalty spot defense
+      geom_point(
+         aes(
+            x = nPenaltySpotOffset_m,
+            y = ( nYLimit / 2 )
+         ),
+         color = cLineColour
+      ) +
+      # penalty spot offense
+      geom_point(
+         aes(
+            x = nXLimit - nPenaltySpotOffset_m,
+            y = ( nYLimit / 2 )
+         ),
+         color = cLineColour
+      ) +
+      # centre circle
+      geom_polygon(
+         data = dtCentreCircle,
+         aes(
+            x = x,
+            y = y
+         ),
+         color = cLineColour,
+         alpha = 0
+      ) +
+      # centre line
+      geom_segment(
+         aes(
+            x = nXLimit / 2,
+            xend = nXLimit / 2,
+            y = 0,
+            yend = nYLimit
+         ),
+         color = cLineColour
+      ) +
+      # centre spot
+      geom_point(
+         aes(
+            x = ( nXLimit / 2 ),
+            y = ( nYLimit / 2 )
+         ),
+         color = cLineColour
+      ) + 
+      # left bottom corner arc
+      geom_path(
+         data = dtCornerArc,
+         aes(
+            x = x,
+            y = y
+         ),
+         color = cLineColour
+         # alpha = 0
+      ) +
+      # left top corner arc
+      geom_path(
+         data = dtCornerArc,
+         aes(
+            x = x,
+            y = nYLimit - y
+         ),
+         color = cLineColour
+      ) +
+      # right bottom corner arc
+      geom_path(
+         data = dtCornerArc,
+         aes(
+            x = nXLimit - x,
+            y = y
+         ),
+         color = cLineColour
+      ) +
+      # right top corner arc
+      geom_path(
+         data = dtCornerArc,
+         aes(
+            x = nXLimit - x,
+            y = nYLimit - y
+         ),
+         color = cLineColour
+      ) +
+      # direction of attack
+      geom_rect(
+         data = data.table(
+            x = ( nXLimit / 2 ) - ( nXLimit * 2 / 105 ),
+            xend = ( nXLimit / 2 ) + ( nXLimit * 2 / 105 ),
+            y = ( nYLimit * -2.5 / 68 ) + ( nXLimit * 0.9 / 105 ),
+            yend = ( nYLimit * -2.5 / 68 ) + ( nXLimit * 1.1 / 105 )
+         ),
+         aes(
+            xmin = x,
+            xmax = xend,
+            ymin = y,
+            ymax = yend
+         ),
+         # arrow = arrow(length = unit(0.03, "npc")),
+         color = cLineColour
+      ) +
+      geom_polygon(
+         data = data.table(
+            x = c(
+               ( nXLimit / 2 ),
+               ( nXLimit / 2 ) + ( nXLimit * 2 / 105 ),
+               ( nXLimit / 2 )
+            ),
+            y = c(
+               nYLimit * -2.5 / 68,
+               ( nYLimit * -2.5 / 68 ) + ( nXLimit * 1 / 105 ),
+               ( nYLimit * -2.5 / 68 ) + ( nXLimit * 2 / 105 )
+            )
+         ),
+         aes(
+            x = x,
+            y = y
+         ),
+         fill = cLineColour
+      ) +
+      xlab(NULL) + 
+      ylab(NULL) + 
+      coord_fixed()
+
+   return ( plotObject )
+
+}
+
+# Lipstick for the pitch background plots
+theme_pitch <- function () { 
+
+   theme_bw(
+      base_size = 12
+   ) + 
+      theme(
+         # panel.background = element_rect(
+         #    fill = "white", 
+         #    colour = NA
+         # ),
+         plot.background = element_rect(fill = "white", colour = NA), 
+         legend.background = element_rect(fill = "transparent", colour = NA),
+         legend.key = element_rect(fill = "transparent", colour = NA),
+         plot.caption = element_text(hjust = 0),
+         axis.title.x = element_blank(),
+         axis.text.x = element_blank(),
+         axis.ticks.x = element_blank(),
+         axis.title.y = element_blank(),
+         axis.text.y = element_blank(),
+         axis.ticks.y = element_blank(),
+         axis.line = element_line(colour = "black"),
+         panel.grid.major = element_blank(),
+         panel.grid.minor = element_blank(),
+         # panel.border = element_blank(),
+         panel.background = element_blank()
+      )
+
+}
+
+
+fPlotPitchBreakupSonar = function (
+   dtPassesToPlot,
+   iNbrLengthBins = 12,
+   iNbrAngleBins = 4,
+   # vnPassLengthQuantiles = quantile(dtPasses[, pass.length], (0:iNbrLengthBins)/iNbrLengthBins),
+   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iNbrAngleBins)/iNbrAngleBins),
+   # nPassLengthBreakGap = dtPasses[, max(pass.length, na.rm = T)] / iNbrLengthBins,
+   nPassLengthBreakGap = 15,
+   nBlockLength1 = 20,
+   nBlockLength2 = 20,
+   cTitle = NULL
+) {
+   
+   dtPasses = copy(dtPassesToPlot)
+   
+   
+   vnPassLengthBreaks = seq(0, dtPasses[, max(pass.length)], nPassLengthBreakGap)
+   nPassAngleBreakGap = 2 * pi / iNbrAngleBins
+   vnPassAngleBreaks = seq(-pi, pi, nPassAngleBreakGap)
+
+   
+   nZoomFactor = ceiling(
+      max(nLocation1Size / nBlockLength1, nLocation2Size / nBlockLength2)
+   ) * 2 
+   nZoomFactor = nZoomFactor * 1.1
+   
+   dtPasses[, 
+      # pass.length.bucket := as.numeric(as.character(cut(pass.length, vnPassLengthBreaks, labels = (head(vnPassLengthBreaks, -1) + tail(vnPassLengthBreaks, -1))/2)))
+      pass.length.bucket := pass.length %/% nPassLengthBreakGap
+   ]
+   
+   dtPasses[, 
+      pass.angle.bucket := pass.angle %/% ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ),
+      pass.length.bucket
+   ]
+   
+   dtPasses[
+      pass.angle.bucket == pi %/% ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ), 
+      pass.angle.bucket := pass.angle.bucket - 1
+   ]
+   
+   
+   dtPasses[, 
+      pass.angle.bucket.width := ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ), 
+      pass.length.bucket
+   ]
+   
+   dtPasses[, 
+      pass.angle.bucket := ( pass.angle.bucket + 0.5 ) * ( pass.angle.bucket.width )
+   ]
+   
+   dtPasses[, 
+      pass.length.bucket := ( pass.length.bucket + 0.5 ) * nPassLengthBreakGap, 
+      pass.length.bucket
+   ]
+   
+   
+   
+   dtPasses[,
+      location1.bucket := ( nBlockLength1 * ( location1 %/% nBlockLength1 ) ) + ( nBlockLength1 / 2 )
+   ]
+   
+   dtPasses[,
+      location2.bucket := ( nBlockLength2 * ( location2 %/% nBlockLength2 ) ) + ( nBlockLength2 / 2 )
+   ]
+   
+   p1 = ggplot(
+      dtPasses[
+         location1 < nLocation1Size &
+         location2 < nLocation2Size
+      ][
+         !is.na(pass.length.bucket) &
+         !is.na(pass.angle.bucket), 
+         list(
+            PassCount = .N, 
+            Success_pct = sum(is.na(pass.outcome.name)) / .N
+         ),
+         list(
+            location1.bucket,
+            location2.bucket,
+            pass.angle.bucket, 
+            pass.angle.bucket.width,
+            pass.length.bucket,
+            xmin = pass.angle.bucket - ( pass.angle.bucket.width / 2 ),
+            xmax = pass.angle.bucket + ( pass.angle.bucket.width / 2 ),
+            ymin = pass.length.bucket - ( nPassLengthBreakGap / 2 ),
+            ymax = pass.length.bucket + ( nPassLengthBreakGap / 2 )
+         )
+      ][,
+         ymin2 := pass.length.bucket + ( nPassLengthBreakGap * 1 / 2 ) - ( nPassLengthBreakGap * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) )
+      ][,
+         ymax2 := pass.length.bucket + ( nPassLengthBreakGap * 1 / 2 )
+      ][,
+      #    xmin2 := pass.angle.bucket - ( pass.angle.bucket.width * sqrt( PassCount / max(PassCount) ) / 2 )
+      # ][,
+      #    xmax2 := pass.angle.bucket + ( pass.angle.bucket.width * sqrt( PassCount / max(PassCount) ) / 2 )
+      # ][,
+      #    ymin2 := pass.length.bucket - ( nPassLengthBreakGap * ( PassCount / max(PassCount) ) / 2 )
+      # ][,
+      #    ymax2 := pass.length.bucket + ( nPassLengthBreakGap * ( PassCount / max(PassCount) ) / 2 )
+      # ][,
+         xmin2 := pass.angle.bucket - ( pass.angle.bucket.width * 1 / 2 )
+      ][,
+         xmax2 := pass.angle.bucket + ( pass.angle.bucket.width * 1 / 2 )
+      ][,
+         ymin3 := pass.length.bucket - ( nPassLengthBreakGap * 1 / 2 )
+      ][,
+         ymax3 := pass.length.bucket + ( nPassLengthBreakGap * 1 / 2 )
+      ][,
+         xmin3 := pass.angle.bucket - ( pass.angle.bucket.width * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) / 2 )
+      ][,
+         xmax3 := pass.angle.bucket + ( pass.angle.bucket.width * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) / 2 )
+      ][,
+         list(
+            x = c(
+               seq(
+                  ymin2,
+                  ymax2,
+                  ( ymax2 - ymin2 ) / 50
+               ) * cos(xmin2),
+               cos(
+                  seq(
+                     xmin2,
+                     xmax2,
+                     ( xmax2 - xmin2 ) / 50
+                  )
+               ) * ymax2,
+               seq(
+                  ymax2,
+                  ymin2,
+                  ( ymin2 - ymax2 ) / 50
+               ) * cos(xmax2),
+               cos(
+                  seq(
+                     xmax2,
+                     xmin2,
+                     ( xmin2 - xmax2 ) / 50
+                  )
+               ) * ymin2
+            ),
+            y = c(
+               seq(
+                  ymin2,
+                  ymax2,
+                  ( ymax2 - ymin2 ) / 50
+               ) * sin(xmin2),
+               sin(
+                  seq(
+                     xmin2,
+                     xmax2,
+                     ( xmax2 - xmin2 ) / 50
+                  )
+               ) * ymax2,
+               seq(
+                  ymax2,
+                  ymin2,
+                  ( ymin2 - ymax2 ) / 50
+               ) * sin(xmax2),
+               sin(
+                  seq(
+                     xmax2,
+                     xmin2,
+                     ( xmin2 - xmax2 ) / 50
+                  )
+               ) * ymin2
+            ),
+            
+            x2 = c(
+               seq(
+                  ymin3,
+                  ymax3,
+                  ( ymax3 - ymin3 ) / 50
+               ) * cos(xmin3),
+               cos(
+                  seq(
+                     xmin3,
+                     xmax3,
+                     ( xmax3 - xmin3 ) / 50
+                  )
+               ) * ymax3,
+               seq(
+                  ymax3,
+                  ymin3,
+                  ( ymin3 - ymax3 ) / 50
+               ) * cos(xmax3),
+               cos(
+                  seq(
+                     xmax3,
+                     xmin3,
+                     ( xmin3 - xmax3 ) / 50
+                  )
+               ) * ymin3
+            ),
+            y2 = c(
+               seq(
+                  ymin3,
+                  ymax3,
+                  ( ymax3 - ymin3 ) / 50
+               ) * sin(xmin3),
+               sin(
+                  seq(
+                     xmin3,
+                     xmax3,
+                     ( xmax3 - xmin3 ) / 50
+                  )
+               ) * ymax3,
+               seq(
+                  ymax3,
+                  ymin3,
+                  ( ymin3 - ymax3 ) / 50
+               ) * sin(xmax3),
+               sin(
+                  seq(
+                     xmax3,
+                     xmin3,
+                     ( xmin3 - xmax3 ) / 50
+                  )
+               ) * ymin3
+            ),
+            xBound = c(
+               seq(
+                  ymin,
+                  ymax,
+                  ( ymax - ymin ) / 50
+               ) * cos(xmin),
+               cos(
+                  seq(
+                     xmin,
+                     xmax,
+                     ( xmax - xmin ) / 50 
+                  )
+               ) * ymax,
+               seq(
+                  ymax,
+                  ymin,
+                  ( ymin - ymax ) / 50
+               ) * cos(xmax),
+               cos(
+                  seq(
+                     xmax,
+                     xmin,
+                     ( xmin - xmax ) / 50
+                  )
+               ) * ymin
+            ),
+            yBound = c(
+               seq(
+                  ymin,
+                  ymax,
+                  ( ymax - ymin ) / 50
+               ) * sin(xmin),
+               sin(
+                  seq(
+                     xmin,
+                     xmax,
+                     ( xmax - xmin ) / 50 
+                  )
+               ) * ymax,
+               seq(
+                  ymax,
+                  ymin,
+                  ( ymin - ymax ) / 50
+               ) * sin(xmax),
+               sin(
+                  seq(
+                     xmax,
+                     xmin,
+                     ( xmin - xmax ) / 50 
+                  )
+               ) * ymin
+            )
+         ),
+        list(
+           location1.bucket = location1.bucket * nZoomFactor,
+           location2.bucket = location2.bucket * nZoomFactor,
+           PassCount,
+           Success_pct,
+           pass.angle.bucket,
+           pass.length.bucket
+        )
+      ]
+   )
+   
+   p1 = fAddPitchLines(
+      p1, 
+      nXLimit = nZoomFactor * nLocation1Size, 
+      nYLimit = nZoomFactor * nLocation2Size,
+      cPitchColour = '#111111', 
+      cLineColour = '#333333'
+   )
+   
+   p1 = p1 + 
+      # geom_rect(
+      #    aes(
+      #       xmin = 0,
+      #       xmax = 120 * nZoomFactor,
+      #       ymin = 0,
+      #       ymax = 80 * nZoomFactor,
+      #    ),
+      #    fill = 'black',
+      #    alpha = 0.5
+      # ) +
+      geom_polygon(
+         data = dtPasses[
+            location1 < nLocation1Size &
+            location2 < nLocation2Size
+         ][,
+            list(
+               # x = ( dtPasses[, max(pass.length.bucket)] + ( nPassLengthBreakGap / 2 ) ) * cos(seq(-pi, pi, pi / 10)),
+               # y = ( dtPasses[, max(pass.length.bucket)] + ( nPassLengthBreakGap / 2 ) ) * sin(seq(-pi, pi, pi / 10))
+               x = max( nLocation1Size, nLocation2Size ) * cos(seq(-pi, pi, pi / 10)),
+               y = max( nLocation1Size, nLocation2Size ) * sin(seq(-pi, pi, pi / 10))
+            ),
+            list(
+               location1.bucket = location1.bucket * nZoomFactor,
+               location2.bucket = location2.bucket * nZoomFactor
+             )
+         ],
+         aes(
+            x = x + location1.bucket,
+            y = y + location2.bucket,
+            group = paste0(
+               location1.bucket,
+               location2.bucket
+            )
+        ),
+        fill = '#000000',
+        alpha = 0.8
+      ) +
+      geom_point(
+        aes(
+            x = location1.bucket,
+            y = location2.bucket
+        ),
+        color = '#000000'
+      ) +
+      # geom_point(
+      #    data = dtPasses,
+      #    aes(x = pass.angle, y = pass.length)
+      # ) +
+      geom_polygon(
+        aes(
+            x = x + location1.bucket,
+            y = y + location2.bucket,
+            fill = Success_pct,
+            group = paste0(
+               location1.bucket,
+               location2.bucket,
+               pass.angle.bucket,
+               pass.length.bucket
+            )
+        ),
+        color = 'black',
+        size = 0.1
+        # alpha = 0.8
+      ) +
+      # geom_polygon(
+      #   aes(
+      #       x = x2 + location1.bucket,
+      #       y = y2 + location2.bucket,
+      #       fill = Success_pct,
+      #       group = paste0(
+      #          location1.bucket,
+      #          location2.bucket,
+      #          pass.angle.bucket,
+      #          pass.length.bucket
+      #       )
+      #   )
+      #   # color = 'black'
+      #   # alpha = 0.8
+      # ) +
+      # geom_polygon(
+      #   aes(
+      #       x = xBound + location1.bucket,
+      #       y = yBound + location2.bucket,
+      #       fill = Success_pct,
+      #       group = paste0(
+      #          location1.bucket,
+      #          location2.bucket,
+      #          pass.angle.bucket,
+      #          pass.length.bucket
+      #       )
+      #   ),
+      #   color = '#333333',
+      #   alpha = 0
+      # ) +
+      # geom_point(aes(x = pass.angle.bucket, y = pass.length.bucket, size = PassCount, color = Success_pct)) +
+      # geom_vline(xintercept = vnPassAngleQuantiles) +
+      # geom_hline(yintercept = vnPassLengthQuantiles) +
+      # scale_color_continuous(high = 'white', low = 'red', guide = 'none') +
+      scale_fill_gradient2(
+         # low = '#89cff0',
+         # low = '#0070bb',
+         # mid = 'yellow',
+         # high = 'red',
+         low = 'red',
+         mid = 'yellow',
+         high = '#006400',
+         midpoint = 0.5, 
+         name = 'Success %', 
+         labels = percent, 
+         guide = 'none',
+         limits = c(0, 1)
+      ) +
+      # scale_fill_continuous(high = 'white', low = 'red', name = 'Success %', labels = percent, limits = c(0, 1), guide = 'none' ) +
+      # coord_polar()
+      theme_pitch() +
+      scale_x_continuous(expand=c(0,0)) +
+      scale_y_continuous(expand=c(0,0)) +
+      theme(
+         plot.background = element_rect(fill = '#000000', color = NA),
+         panel.background = element_rect(fill = '#000000', color = NA),
+         axis.line = element_blank(),
+         legend.text = element_text(colour = 'white'),
+         # legend.background = element_rect(fill = '#000000'),
+         legend.title = element_text(colour = 'white'),
+         title = element_text(size = 14, colour = 'white')
+      ) +
+      labs(
+         title = cTitle,
+         subtitle = paste0(
+            nrow(dtPasses), ' passes, ',
+            round(100 * dtPasses[, sum(is.na(pass.outcome.name)) / .N]), '% success rate'
+         )
+      )
+   
+   # p1 <- ggplot_gtable(ggplot_build(p1))
+   # p1$layout$clip[p1$layout$name=="panel"] <- "off"
+   
+   # grid.draw(p1)
+   p1
+
+}
+
+
+fPlotOverallSonar = function (
+   dtPassesToPlot,
+   iNbrLengthBins = 12,
+   iNbrAngleBins = 4,
+   # vnPassLengthQuantiles = quantile(dtPasses[, pass.length], (0:iNbrLengthBins)/iNbrLengthBins),
+   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iNbrAngleBins)/iNbrAngleBins),
+   # nPassLengthBreakGap = dtPasses[, max(pass.length, na.rm = T)] / iNbrLengthBins,
+   nPassLengthBreakGap = 15,
+   cTitle = NULL
+) {
+
+   dtPasses = copy(dtPassesToPlot)
+   
+   vnPassLengthBreaks = seq(0, dtPasses[, max(pass.length)], nPassLengthBreakGap)
+   nPassAngleBreakGap = 2 * pi / iNbrAngleBins
+   vnPassAngleBreaks = seq(-pi, pi, nPassAngleBreakGap) 
+   
+   nZoomFactor = 1
+   
+   
+   dtPasses[, 
+      # pass.length.bucket := as.numeric(as.character(cut(pass.length, vnPassLengthBreaks, labels = (head(vnPassLengthBreaks, -1) + tail(vnPassLengthBreaks, -1))/2)))
+      pass.length.bucket := pass.length %/% nPassLengthBreakGap
+   ]
+   
+   dtPasses[, 
+      pass.angle.bucket := pass.angle %/% ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ),
+      pass.length.bucket
+   ]
+   
+   dtPasses[
+      pass.angle.bucket == pi %/% ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ), 
+      pass.angle.bucket := pass.angle.bucket - 1
+   ]
+   
+   
+   dtPasses[, 
+      pass.angle.bucket.width := ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ), 
+      pass.length.bucket
+   ]
+   
+   dtPasses[, 
+      pass.angle.bucket := ( pass.angle.bucket + 0.5 ) * ( pass.angle.bucket.width )
+   ]
+   
+   dtPasses[, 
+      pass.length.bucket := ( pass.length.bucket + 0.5 ) * nPassLengthBreakGap, 
+      pass.length.bucket
+   ]
+   
+   
+   p2 = ggplot(
+      dtPasses[
+         location1 < nLocation1Size &
+         location2 < nLocation2Size
+      ][
+         !is.na(pass.length.bucket) &
+         !is.na(pass.angle.bucket), 
+         list(
+            PassCount = .N, 
+            Success_pct = sum(is.na(pass.outcome.name)) / .N
+         ),
+         list(
+            pass.angle.bucket, 
+            pass.angle.bucket.width,
+            pass.length.bucket,
+            xmin = pass.angle.bucket - ( pass.angle.bucket.width / 2 ),
+            xmax = pass.angle.bucket + ( pass.angle.bucket.width / 2 ),
+            ymin = pass.length.bucket - ( nPassLengthBreakGap / 2 ),
+            ymax = pass.length.bucket + ( nPassLengthBreakGap / 2 )
+         )
+      ][,
+         ymin2 := pass.length.bucket + ( nPassLengthBreakGap * 1 / 2 ) - ( nPassLengthBreakGap * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) )
+      ][,
+         ymax2 := pass.length.bucket + ( nPassLengthBreakGap * 1 / 2 )
+      ][,
+      #    xmin2 := pass.angle.bucket - ( pass.angle.bucket.width * sqrt( PassCount / max(PassCount) ) / 2 )
+      # ][,
+      #    xmax2 := pass.angle.bucket + ( pass.angle.bucket.width * sqrt( PassCount / max(PassCount) ) / 2 )
+      # ][,
+      #    ymin2 := pass.length.bucket - ( nPassLengthBreakGap * ( PassCount / max(PassCount) ) / 2 )
+      # ][,
+      #    ymax2 := pass.length.bucket + ( nPassLengthBreakGap * ( PassCount / max(PassCount) ) / 2 )
+      # ][,
+         xmin2 := pass.angle.bucket - ( pass.angle.bucket.width * 1 / 2 )
+      ][,
+         xmax2 := pass.angle.bucket + ( pass.angle.bucket.width * 1 / 2 )
+      ][,
+         ymin3 := pass.length.bucket - ( nPassLengthBreakGap * 1 / 2 )
+      ][,
+         ymax3 := pass.length.bucket + ( nPassLengthBreakGap * 1 / 2 )
+      ][,
+         xmin3 := pass.angle.bucket - ( pass.angle.bucket.width * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) / 2 )
+      ][,
+         xmax3 := pass.angle.bucket + ( pass.angle.bucket.width * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) / 2 )
+      ][,
+         list(
+            x = c(
+               seq(
+                  ymin2,
+                  ymax2,
+                  ( ymax2 - ymin2 ) / 50
+               ) * cos(xmin2),
+               cos(
+                  seq(
+                     xmin2,
+                     xmax2,
+                     ( xmax2 - xmin2 ) / 50
+                  )
+               ) * ymax2,
+               seq(
+                  ymax2,
+                  ymin2,
+                  ( ymin2 - ymax2 ) / 50
+               ) * cos(xmax2),
+               cos(
+                  seq(
+                     xmax2,
+                     xmin2,
+                     ( xmin2 - xmax2 ) / 50
+                  )
+               ) * ymin2
+            ),
+            y = c(
+               seq(
+                  ymin2,
+                  ymax2,
+                  ( ymax2 - ymin2 ) / 50
+               ) * sin(xmin2),
+               sin(
+                  seq(
+                     xmin2,
+                     xmax2,
+                     ( xmax2 - xmin2 ) / 50
+                  )
+               ) * ymax2,
+               seq(
+                  ymax2,
+                  ymin2,
+                  ( ymin2 - ymax2 ) / 50
+               ) * sin(xmax2),
+               sin(
+                  seq(
+                     xmax2,
+                     xmin2,
+                     ( xmin2 - xmax2 ) / 50
+                  )
+               ) * ymin2
+            ),
+            
+            x2 = c(
+               seq(
+                  ymin3,
+                  ymax3,
+                  ( ymax3 - ymin3 ) / 50
+               ) * cos(xmin3),
+               cos(
+                  seq(
+                     xmin3,
+                     xmax3,
+                     ( xmax3 - xmin3 ) / 50
+                  )
+               ) * ymax3,
+               seq(
+                  ymax3,
+                  ymin3,
+                  ( ymin3 - ymax3 ) / 50
+               ) * cos(xmax3),
+               cos(
+                  seq(
+                     xmax3,
+                     xmin3,
+                     ( xmin3 - xmax3 ) / 50
+                  )
+               ) * ymin3
+            ),
+            y2 = c(
+               seq(
+                  ymin3,
+                  ymax3,
+                  ( ymax3 - ymin3 ) / 50
+               ) * sin(xmin3),
+               sin(
+                  seq(
+                     xmin3,
+                     xmax3,
+                     ( xmax3 - xmin3 ) / 50
+                  )
+               ) * ymax3,
+               seq(
+                  ymax3,
+                  ymin3,
+                  ( ymin3 - ymax3 ) / 50
+               ) * sin(xmax3),
+               sin(
+                  seq(
+                     xmax3,
+                     xmin3,
+                     ( xmin3 - xmax3 ) / 50
+                  )
+               ) * ymin3
+            ),
+            xBound = c(
+               seq(
+                  ymin,
+                  ymax,
+                  ( ymax - ymin ) / 50
+               ) * cos(xmin),
+               cos(
+                  seq(
+                     xmin,
+                     xmax,
+                     ( xmax - xmin ) / 50 
+                  )
+               ) * ymax,
+               seq(
+                  ymax,
+                  ymin,
+                  ( ymin - ymax ) / 50
+               ) * cos(xmax),
+               cos(
+                  seq(
+                     xmax,
+                     xmin,
+                     ( xmin - xmax ) / 50
+                  )
+               ) * ymin
+            ),
+            yBound = c(
+               seq(
+                  ymin,
+                  ymax,
+                  ( ymax - ymin ) / 50
+               ) * sin(xmin),
+               sin(
+                  seq(
+                     xmin,
+                     xmax,
+                     ( xmax - xmin ) / 50 
+                  )
+               ) * ymax,
+               seq(
+                  ymax,
+                  ymin,
+                  ( ymin - ymax ) / 50
+               ) * sin(xmax),
+               sin(
+                  seq(
+                     xmax,
+                     xmin,
+                     ( xmin - xmax ) / 50 
+                  )
+               ) * ymin
+            )
+         ),
+        list(
+           PassCount,
+           Success_pct,
+           pass.angle.bucket,
+           pass.length.bucket
+        )
+      ]
+   )
+   
+   
+   p2 = p2 + 
+      # geom_rect(
+      #    aes(
+      #       xmin = 0,
+      #       xmax = 120 * nZoomFactor,
+      #       ymin = 0,
+      #       ymax = 80 * nZoomFactor,
+      #    ),
+      #    fill = 'black',
+      #    alpha = 0.5
+      # ) +
+      geom_polygon(
+         data = dtPasses[
+            location1 < nLocation1Size &
+            location2 < nLocation2Size
+         ][,
+            list(
+               # x = ( dtPasses[, max(pass.length.bucket)] + ( nPassLengthBreakGap / 2 ) ) * cos(seq(-pi, pi, pi / 10)),
+               # y = ( dtPasses[, max(pass.length.bucket)] + ( nPassLengthBreakGap / 2 ) ) * sin(seq(-pi, pi, pi / 10))
+               x = max( nLocation1Size, nLocation2Size ) * cos(seq(-pi, pi, pi / 50)),
+               y = max( nLocation1Size, nLocation2Size ) * sin(seq(-pi, pi, pi / 50))
+            )
+         ],
+         aes(
+            x = x,
+            y = y
+        ),
+        color = '#222222',
+        alpha = 0
+      ) +
+      # geom_point(
+      #    data = dtPasses,
+      #    aes(x = pass.angle, y = pass.length)
+      # ) +
+      geom_polygon(
+        aes(
+            x = x,
+            y = y,
+            fill = Success_pct,
+            group = paste0(
+               pass.angle.bucket,
+               pass.length.bucket
+            )
+        ),
+        color = 'black'
+        # alpha = 0.8
+      ) +
+      # geom_polygon(
+      #   aes(
+      #       x = x2 + location1.bucket,
+      #       y = y2 + location2.bucket,
+      #       fill = Success_pct,
+      #       group = paste0(
+      #          location1.bucket,
+      #          location2.bucket,
+      #          pass.angle.bucket,
+      #          pass.length.bucket
+      #       )
+      #   )
+      #   # color = 'black'
+      #   # alpha = 0.8
+      # ) +
+      # geom_polygon(
+      #   aes(
+      #       x = xBound + location1.bucket,
+      #       y = yBound + location2.bucket,
+      #       fill = Success_pct,
+      #       group = paste0(
+      #          location1.bucket,
+      #          location2.bucket,
+      #          pass.angle.bucket,
+      #          pass.length.bucket
+      #       )
+      #   ),
+      #   color = '#333333',
+      #   alpha = 0
+      # ) +
+      # geom_point(aes(x = pass.angle.bucket, y = pass.length.bucket, size = PassCount, color = Success_pct)) +
+      # geom_vline(xintercept = vnPassAngleQuantiles) +
+      # geom_hline(yintercept = vnPassLengthQuantiles) +
+      # scale_color_continuous(high = 'white', low = 'red', guide = 'none') +
+      scale_fill_gradient2(
+         # low = '#89cff0',
+         low = 'red',
+         mid = 'yellow',
+         high = '#006400',
+         midpoint = 0.5, 
+         name = 'Success %', 
+         labels = percent, 
+         guide = 'none',
+         limits = c(0, 1)
+      ) +
+      # scale_fill_continuous(high = 'white', low = 'red', name = 'Success %', labels = percent, limits = c(0, 1), guide = 'none' ) +
+      # coord_polar() +
+      coord_fixed() +
+      theme_pitch() +
+      scale_x_continuous(expand=c(0,0)) +
+      scale_y_continuous(expand=c(0,0)) +
+      theme(
+         plot.background = element_rect(fill = '#010101', color = NA),
+         panel.background = element_rect(fill = '#010101', color = NA),
+         panel.border = element_blank(),
+         axis.line = element_blank(),
+         legend.text = element_text(colour = 'white'),
+         # legend.background = element_rect(fill = '#000000'),
+         legend.title = element_text(colour = 'white'),
+         title = element_text(size = 6, colour = 'white')
+      ) +
+      labs(
+         title = cTitle,
+         subtitle = paste0(
+            nrow(dtPasses), ' passes, ',
+            round(100 * dtPasses[, sum(is.na(pass.outcome.name)) / .N]), '% success rate'
+         )
+      )
+   
+   p2
+   
+}
+
+```
+
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+load("/media/ask/Data/Personal/Projects/Personal/Messi_Statsbomb/ProcessedData/69324/Pass.Rdata")
+dtPasses = dtEvent[, list(id, index, team.id, team.name, player.id, player.name, pass.length, pass.angle, pass.outcome.name, location1, location2, pass.end_location1, pass.end_location2)]
+rm(dtEvent)
+dtPasses = dtPasses[team.id == 217]
+
+dtPasses[, pass.angle := as.numeric(as.character(pass.angle))]
+dtPasses[, pass.length := as.numeric(as.character(pass.length))]
+dtPasses[, location1 := as.numeric(as.character(location1))]
+dtPasses[, location2 := as.numeric(as.character(location2))]
+dtPasses[, pass.angle := -pass.angle]
+
+```
+
+```{r, Charts, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+plotPitchBreakupSonar = fPlotPitchBreakupSonar (
+   dtPassesToPlot = dtPasses,
+   iNbrLengthBins = 12,
+   iNbrAngleBins = 4,
+   # vnPassLengthQuantiles = quantile(dtPasses[, pass.length], (0:iNbrLengthBins)/iNbrLengthBins),
+   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iNbrAngleBins)/iNbrAngleBins),
+   # nPassLengthBreakGap = dtPasses[, max(pass.length, na.rm = T)] / iNbrLengthBins,
+   nPassLengthBreakGap = 15,
+   nBlockLength1 = 20,
+   nBlockLength2 = 20,
+   cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
+)
+
+
+plotOverallSonar = fPlotOverallSonar (
+   dtPassesToPlot = dtPasses,
+   iNbrLengthBins = 12,
+   iNbrAngleBins = 4,
+   # vnPassLengthQuantiles = quantile(dtPasses[, pass.length], (0:iNbrLengthBins)/iNbrLengthBins),
+   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iNbrAngleBins)/iNbrAngleBins),
+   # nPassLengthBreakGap = dtPasses[, max(pass.length, na.rm = T)] / iNbrLengthBins,
+   nPassLengthBreakGap = 15,
+   cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
+)
+
+
+```
+
+```{r, Watermarks, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+pngStatsbombLogo = readPNG('/home/ask/Documents/open-data/stats-bomb-logo.png') 
+rasterStatsbombLogo <- rasterGrob(pngStatsbombLogo, interpolate=TRUE)
+
+pngCredits = readPNG('/home/ask/Pictures/Screenshot from 2019-08-21 08-08-08.png') 
+rasterCredits <- rasterGrob(pngCredits, interpolate=TRUE)
+
+plotPitchBreakupSonar = plotPitchBreakupSonar + 
+   annotation_custom(
+      rasterStatsbombLogo,
+      ymin = ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$y.range[1],
+      ymax = 0,
+      xmin = ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$x.range[2] - ( abs(ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$y.range[1]) * 1485 / 330 ),
+      xmax = ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$x.range[2]
+   )
+
+plotPitchBreakupSonar = plotPitchBreakupSonar + 
+   annotation_custom(
+      rasterCredits,
+      ymin = ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$y.range[1],
+      ymax = 0,
+      xmin = ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$x.range[2] - ( 2 * abs(ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$y.range[1]) * 1485 / 330 ),
+      xmax = ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$x.range[2] - ( 1 * abs(ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$y.range[1]) * 1485 / 330 )
+   )
+
+
+plotOverallSonar = plotOverallSonar + 
+   annotation_custom(
+      rasterStatsbombLogo,
+      ymin = ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$y.range[1],
+      ymax = ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$y.range[1] + ( diff(ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$y.range) * 0.04 ),
+      xmin = ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$x.range[2] - ( ( diff(ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$y.range) * 0.04 ) * 1485 / 330 ),
+      xmax = ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$x.range[2]
+   )
+
+plotOverallSonar = plotOverallSonar + 
+   annotation_custom(
+      rasterCredits,
+      ymin = ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$y.range[1] + ( diff(ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$y.range) * 0.04 ),
+      ymax = ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$y.range[1] + ( diff(ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$y.range) * 0.04 * 2),
+      xmin = ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$x.range[2] - ( ( diff(ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$y.range) * 0.04 ) * 1485 / 330 ),
+      xmax = ggplot_build(plotOverallSonar)$layout$panel_params[[1]]$x.range[2]
+   )
+
+
+if ( F ) {
+         
+   # this takes veeeeeeeery long
+   ggsave(
+      plot = plotPitchBreakupSonar,
+      filename = 'plotPitchBreakupSonar.png', 
+      width = 320, 
+      height = 237, 
+      units = 'mm',
+      dpi = 450
+   )
+   
+   ggsave(
+      plot = plotOverallSonar,
+      filename = 'plotOverallSonar.png', 
+      width = 91, 
+      height = 100, 
+      dpi = 450,
+      units = 'mm'
+   )
+   
+}
+
+```
+
+```{r, ChartRenders, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, out.width = 1500, results = 'asis'}
+
+knitr::include_graphics("./plotOverallSonar.png")
+knitr::include_graphics("./plotPitchBreakupSonar.png")
+
+```
