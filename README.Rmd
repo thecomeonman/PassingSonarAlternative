@@ -19,11 +19,14 @@ The <a href = "https://statsbomb.com/2019/07/a-sneak-peak-at-iq-tactics-a-brief-
 
 ### With the design below, I try to solve these problems with some more minor enhancements
 
-- Think of the chart as a bunch of concentric rings. Each ring captures passes falling within a particular range of length. Each block in the ring captures passes of the respective lengths in a paritcular range of direction The blocks have been calculated in such a way to cover approximately the same sized area of the pitch as any other block, which is why each block covers a lesser part of the circumference on passes of longer lengths compared to the part of the circumference it covers on passes of shorter lengths. ( this logic needs improvement for more equivalent blocks but the philosophy is that )
+- Think of the chart as a bunch of concentric rings. Each ring captures passes falling within a particular range of lengths. The rings are equally spaced so the increase in range from ring 1 to ring 2 is the same as the increase in range from any ring n to ring n + 1.
 
-- The radius of the circle in the background of each sonar is proportional to the length of the pitch. You can use that as a reference to get an idea of how long a pass actually was.
+- The radius of the circle in the background of each sonar is proportional to the length of the pitch. You can use that as a reference to get an idea of how long a pass actually 
 
-- The thickness of each block in the ring is proportional to the number of passes of that length and angle. ( It's actuallly proportional to the square root of the number of passes, if I make it proportional then the blocks with few passes become too small to be visible. )
+- Each block in the ring captures passes of the respective lengths in a paritcular range of direction. The blocks have been calculated in such a way to cover approximately the same sized area of the pitch as any other block, which is why each block spans a lesser part of the circumference on passes of longer lengths compared to the part of the circumference it covers on passes of shorter lengths.
+was.
+
+- The thickness of each block in the ring is proportional to the number of passes of that length and angle. ( It's actuallly proportional to the square root of the number of passes, if I make it proportional then the blocks with few passes become too small to be visible. Suggestions to solve this would be highly appreciated. )
 
 - The colour of each block is proportional to the success percent of the passes associated with that block, going from red to dark green for 0% to 100%
 
@@ -366,9 +369,9 @@ theme_pitch <- function () {
 fPlotPitchBreakupSonar = function (
    dtPassesToPlot,
    iNbrLengthBins = 12,
-   iNbrAngleBins = 4,
+   iBlocksInFirstRing = 4,
    # vnPassLengthQuantiles = quantile(dtPasses[, pass.length], (0:iNbrLengthBins)/iNbrLengthBins),
-   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iNbrAngleBins)/iNbrAngleBins),
+   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iBlocksInFirstRing)/iBlocksInFirstRing),
    # nPassLengthBreakGap = dtPasses[, max(pass.length, na.rm = T)] / iNbrLengthBins,
    nPassLengthBreakGap = 15,
    nBlockLength1 = 20,
@@ -379,8 +382,8 @@ fPlotPitchBreakupSonar = function (
    dtPasses = copy(dtPassesToPlot)
    
    
-   vnPassLengthBreaks = seq(0, dtPasses[, max(pass.length)], nPassLengthBreakGap)
-   nPassAngleBreakGap = 2 * pi / iNbrAngleBins
+   vnPassLengthBreaks = seq(0, nLocation1Size, nPassLengthBreakGap)
+   nPassAngleBreakGap = 2 * pi / iBlocksInFirstRing
    vnPassAngleBreaks = seq(-pi, pi, nPassAngleBreakGap)
 
    
@@ -389,24 +392,28 @@ fPlotPitchBreakupSonar = function (
    ) * 2 
    nZoomFactor = nZoomFactor * 1.1
    
+   vnPiR2Difference = ( (tail(vnPassLengthBreaks, -1) ^ 2) - (head(vnPassLengthBreaks, -1) ^ 2) ) 
+   vnCurrentLogicAreas = vnPiR2Difference / ( 4 * seq ( length ( ( head(vnPassLengthBreaks, -1) ) ) ) )
+   viNbrAngleBreaks = round(vnPiR2Difference / ( vnPiR2Difference[1] / iBlocksInFirstRing ))
+   
    dtPasses[, 
       # pass.length.bucket := as.numeric(as.character(cut(pass.length, vnPassLengthBreaks, labels = (head(vnPassLengthBreaks, -1) + tail(vnPassLengthBreaks, -1))/2)))
       pass.length.bucket := pass.length %/% nPassLengthBreakGap
    ]
    
    dtPasses[, 
-      pass.angle.bucket := pass.angle %/% ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ),
+      pass.angle.bucket := pass.angle %/% ( 2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] ),
       pass.length.bucket
    ]
    
    dtPasses[
-      pass.angle.bucket == pi %/% ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ), 
+      pass.angle.bucket == pi %/% ( 2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] ), 
       pass.angle.bucket := pass.angle.bucket - 1
    ]
    
    
    dtPasses[, 
-      pass.angle.bucket.width := ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ), 
+      pass.angle.bucket.width := ( 2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] ), 
       pass.length.bucket
    ]
    
@@ -801,9 +808,9 @@ fPlotPitchBreakupSonar = function (
 fPlotOverallSonar = function (
    dtPassesToPlot,
    iNbrLengthBins = 12,
-   iNbrAngleBins = 4,
+   iBlocksInFirstRing = 4,
    # vnPassLengthQuantiles = quantile(dtPasses[, pass.length], (0:iNbrLengthBins)/iNbrLengthBins),
-   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iNbrAngleBins)/iNbrAngleBins),
+   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iBlocksInFirstRing)/iBlocksInFirstRing),
    # nPassLengthBreakGap = dtPasses[, max(pass.length, na.rm = T)] / iNbrLengthBins,
    nPassLengthBreakGap = 15,
    cTitle = NULL
@@ -811,12 +818,14 @@ fPlotOverallSonar = function (
 
    dtPasses = copy(dtPassesToPlot)
    
-   vnPassLengthBreaks = seq(0, dtPasses[, max(pass.length)], nPassLengthBreakGap)
-   nPassAngleBreakGap = 2 * pi / iNbrAngleBins
+   vnPassLengthBreaks = seq(0, nLocation1Size, nPassLengthBreakGap)
+   nPassAngleBreakGap = 2 * pi / iBlocksInFirstRing
    vnPassAngleBreaks = seq(-pi, pi, nPassAngleBreakGap) 
    
    nZoomFactor = 1
    
+   vnPiR2Difference = ( (tail(vnPassLengthBreaks, -1) ^ 2) - (head(vnPassLengthBreaks, -1) ^ 2) ) 
+   viNbrAngleBreaks = round(vnPiR2Difference / ( vnPiR2Difference[1] / iBlocksInFirstRing ))
    
    dtPasses[, 
       # pass.length.bucket := as.numeric(as.character(cut(pass.length, vnPassLengthBreaks, labels = (head(vnPassLengthBreaks, -1) + tail(vnPassLengthBreaks, -1))/2)))
@@ -824,18 +833,17 @@ fPlotOverallSonar = function (
    ]
    
    dtPasses[, 
-      pass.angle.bucket := pass.angle %/% ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ),
+      pass.angle.bucket := pass.angle %/% ( 2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] ),
       pass.length.bucket
    ]
    
    dtPasses[
-      pass.angle.bucket == pi %/% ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ), 
+      pass.angle.bucket == pi %/% ( 2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] ), 
       pass.angle.bucket := pass.angle.bucket - 1
    ]
    
-   
    dtPasses[, 
-      pass.angle.bucket.width := ( nPassAngleBreakGap / ( 1 + pass.length.bucket ) ), 
+      pass.angle.bucket.width := ( 2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] ), 
       pass.length.bucket
    ]
    
@@ -1206,9 +1214,9 @@ dtPasses[, pass.angle := -pass.angle]
 plotPitchBreakupSonar = fPlotPitchBreakupSonar (
    dtPassesToPlot = dtPasses,
    iNbrLengthBins = 12,
-   iNbrAngleBins = 4,
+   iBlocksInFirstRing = 4,
    # vnPassLengthQuantiles = quantile(dtPasses[, pass.length], (0:iNbrLengthBins)/iNbrLengthBins),
-   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iNbrAngleBins)/iNbrAngleBins),
+   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iBlocksInFirstRing)/iBlocksInFirstRing),
    # nPassLengthBreakGap = dtPasses[, max(pass.length, na.rm = T)] / iNbrLengthBins,
    nPassLengthBreakGap = 15,
    nBlockLength1 = 20,
@@ -1220,9 +1228,9 @@ plotPitchBreakupSonar = fPlotPitchBreakupSonar (
 plotOverallSonar = fPlotOverallSonar (
    dtPassesToPlot = dtPasses,
    iNbrLengthBins = 12,
-   iNbrAngleBins = 4,
+   iBlocksInFirstRing = 4,
    # vnPassLengthQuantiles = quantile(dtPasses[, pass.length], (0:iNbrLengthBins)/iNbrLengthBins),
-   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iNbrAngleBins)/iNbrAngleBins),
+   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iBlocksInFirstRing)/iBlocksInFirstRing),
    # nPassLengthBreakGap = dtPasses[, max(pass.length, na.rm = T)] / iNbrLengthBins,
    nPassLengthBreakGap = 15,
    cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
@@ -1278,7 +1286,16 @@ plotOverallSonar = plotOverallSonar +
 
 
 if ( F ) {
-         
+      
+   ggsave(
+      plot = plotOverallSonar,
+      filename = 'plotOverallSonar.png', 
+      width = 91, 
+      height = 100, 
+      dpi = 450,
+      units = 'mm'
+   )
+      
    # this takes veeeeeeeery long
    ggsave(
       plot = plotPitchBreakupSonar,
@@ -1287,15 +1304,6 @@ if ( F ) {
       height = 237, 
       units = 'mm',
       dpi = 450
-   )
-   
-   ggsave(
-      plot = plotOverallSonar,
-      filename = 'plotOverallSonar.png', 
-      width = 91, 
-      height = 100, 
-      dpi = 450,
-      units = 'mm'
    )
    
 }
