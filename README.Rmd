@@ -673,9 +673,6 @@ fPlotSonar = function (
    
    if ( nLocation1Size == nBlockLength1 ) {
       
-      print('is equal')
-      print(head(dtPasses))
-      
       p1 = p1 + 
          geom_polygon(
             data = dtPasses[
