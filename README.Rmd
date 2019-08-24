@@ -59,7 +59,7 @@ library(gtable)
 library(scales)
 library(rjson)
 
-vcMatchFileNames = '/home/ask/Documents/open-data/data/events/69334.json'
+vcMatchFileNames = '/home/ask/Documents/open-data/data/events/69324.json'
 vcTagsToExtract = c("Starting XI",'Pass')
 nLocation2Size = 80
 nLocation1Size = 120
@@ -121,7 +121,9 @@ fJsonToTabular = function(
 
 fJsonToListOfTables = function (
    lMatchJson,
-   vcTagsToExtract
+   vcTagsToExtract,
+   nLocation1Size = 120,
+   nLocation2Size = 80
 ) {
    
    lEvents = list()
@@ -144,7 +146,6 @@ fJsonToListOfTables = function (
                   }
                )
             )
-                     
             
             lEvent[['tactics']][['lineup']] = NULL
             
@@ -230,6 +231,122 @@ fJsonToListOfTables = function (
          lEvents[[iEventIndex]][, pass.angle := -pass.angle]
          
       }
+      
+      if ( names(lEvents)[iEventIndex] == 'Starting XI' ) {
+      
+         # Attaching formation position details
+         # todo - move to a separate function evnetually
+         lEvents[[iEventIndex]][, location1 := as.numeric(NA)] 
+         lEvents[[iEventIndex]][, location2 := as.numeric(NA)] 
+         
+         
+         # 433 with one CDM
+         viteam.id = lEvents[[iEventIndex]][
+            (tactics.formation == '433' &  position.name == 'Center Defensive Midfield'), 
+            unique(team.id)
+         ]
+         
+         if ( length(viteam.id) > 0 ) {
+            
+            lEvents[[iEventIndex]] = merge(
+               lEvents[[iEventIndex]],
+               rbindlist(
+                  lapply(
+                     viteam.id,
+                     function(iteam.id) {
+                        data.table(
+                           team.id = iteam.id,
+                           position.name = c(
+                              'Goalkeeper',
+                              'Right Back','Right Center Back','Left Center Back','Left Back',
+                              'Center Defensive Midfield',
+                              'Right Center Midfield','Left Center Midfield',
+                              'Right Wing','Center Forward', 'Left Wing'
+                           ),
+                           location1 = c(
+                              rep(1 * nLocation1Size/5, 1), 
+                              rep(2 * nLocation1Size/5, 4), 
+                              rep(3 * nLocation1Size/5, 1),
+                              rep(4 * nLocation1Size/5, 2),
+                              rep(5 * nLocation1Size/5, 3)
+                           ) - ( (nLocation1Size/5) / 2),
+                           location2 = c(
+                              ( c(1) - 0.5 ) * ( nLocation2Size / 1 ), 
+                              ( c(1:4) - 0.5 ) * ( nLocation2Size / 4 ), 
+                              ( c(1) - 0.5 ) * ( nLocation2Size / 1 ), 
+                              ( c(1:2) - 0.5 ) * ( nLocation2Size / 2 ), 
+                              ( c(1:3) - 0.5 ) * ( nLocation2Size / 3 )
+                           )
+                        )
+                     }
+                  )
+               ),
+               c('team.id','position.name'),
+               suffixes = c('','.new')
+            )
+            
+            lEvents[[iEventIndex]][is.na(location1), location1 := location1.new]
+            lEvents[[iEventIndex]][is.na(location2), location2 := location2.new]
+            lEvents[[iEventIndex]][, c('location1.new','location2.new') := NULL]
+            
+         }
+         
+         
+         
+         # 3511
+         viteam.id = lEvents[[iEventIndex]][
+            (tactics.formation == '3511'), 
+            unique(team.id)
+         ]
+         
+         if ( length(viteam.id) > 0 ) {
+            
+            lEvents[[iEventIndex]] = merge(
+               lEvents[[iEventIndex]],
+               rbindlist(
+                  lapply(
+                     viteam.id,
+                     function(iteam.id) {
+                        
+                        data.table(
+                           team.id = iteam.id,
+                           position.name = c(
+                              'Goalkeeper',
+                              'Right Center Back','Center Back','Left Center Back',
+                              'Right Wing Back','Right Center Midfield','Center Defensive Midfield','Left Center Midfield','Left Wing Back',
+                              'Center Attacking Midfield',
+                              'Center Forward'
+                           ),
+                           location1 = c(
+                              rep(1 * nLocation1Size/5, 1), 
+                              rep(2 * nLocation1Size/5, 3), 
+                              rep(3 * nLocation1Size/5, 5),
+                              rep(4 * nLocation1Size/5, 1),
+                              rep(5 * nLocation1Size/5, 1)
+                           ) - ( (nLocation1Size/5) / 2),
+                           location2 = c(
+                              ( c(1:1) - 0.5 ) * ( nLocation2Size / 1 ), 
+                              ( c(1:3) - 0.5 ) * ( nLocation2Size / 3 ), 
+                              ( c(1:5) - 0.5 ) * ( nLocation2Size / 5 ), 
+                              ( c(1:1) - 0.5 ) * ( nLocation2Size / 1 ), 
+                              ( c(1:1) - 0.5 ) * ( nLocation2Size / 1 )
+                           )
+                        )
+                        
+                     }
+                  )
+               ),
+               c('team.id','position.name'),
+               suffixes = c('','.new')
+            )
+            
+            lEvents[[iEventIndex]][is.na(location1), location1 := location1.new]
+            lEvents[[iEventIndex]][is.na(location2), location2 := location2.new]
+            lEvents[[iEventIndex]][, c('location1.new','location2.new') := NULL]
+            
+         }
+         
+      }      
 
    }
    
@@ -598,8 +715,6 @@ fPlotSonar = function (
    iNbrRings = 8,
    nLocation2Size = 80,
    nLocation1Size = 120,
-   nBlockLength1 = NULL,
-   nBlockLength2 = NULL,
    bAddPitchBackground = F,
    cTitle = NULL
 ) {
@@ -618,25 +733,19 @@ fPlotSonar = function (
    vnPiR2Difference = ( (tail(vnPassLengthBreaks, -1) ^ 2) - (head(vnPassLengthBreaks, -1) ^ 2) ) 
    viNbrAngleBreaks = round(vnPiR2Difference / ( vnPiR2Difference[1] / iBlocksInFirstRing ))
 
-   # If the data isn't being divided into blocks based on the origin of the 
-   # passes then assume all passes to be in the same block
-   if ( is.null(nBlockLength1) ) {
-      nBlockLength1 = nLocation1Size
-   }
-   
-   if ( is.null(nBlockLength2) ) {
-      nBlockLength2 = nLocation2Size
-   }
-   
    # The coordinates of the pitch will need to be extended to fit multiple
    # sonars in it, since each sonar will individually have a span of 
    # (-length,length).
    # The pitch will be extended to nZoomFactor the dimensions to 
    # accommodate all the sonars.
    nZoomFactor = ceiling(
-      max(nLocation1Size / nBlockLength1, nLocation2Size / nBlockLength2)
-   ) * 2 
-   nZoomFactor = nZoomFactor * 1.1
+      max(
+         dtPasses[, length(unique(location1.bucket))], 
+         dtPasses[, length(unique(location2.bucket)), location1.bucket][, max(V1)],
+         ( nLocation1Size * dtPasses[, length(unique(location2.bucket)), location1.bucket][, max(V1)] ) / nLocation2Size
+      )
+   ) 
+   nZoomFactor = nZoomFactor * 2 *  1.1
    
    # Length bucket number. The bucket number, and not the bucket, is needed
    # to calculate the angle buckets.
@@ -686,19 +795,6 @@ fPlotSonar = function (
    dtPasses[, 
       pass.length.bucket := ( pass.length.bucket + 0.5 ) * nIncremntalRingRadius, 
       pass.length.bucket
-   ]
-   
-   # Marking the data for different sonars based on the input coordinates
-   dtPasses[,
-      location1.bucket := ( 
-         nBlockLength1 * ( location1 %/% nBlockLength1 ) 
-      ) + ( nBlockLength1 / 2 )
-   ]
-   
-   dtPasses[,
-      location2.bucket := ( 
-         nBlockLength2 * ( location2 %/% nBlockLength2 ) 
-      ) + ( nBlockLength2 / 2 )
    ]
    
    # Preparing the polygons needed for various elements of the chart
@@ -873,17 +969,20 @@ fPlotSonar = function (
         ),
         fill = '#000000',
         alpha = ifelse(
-           nLocation1Size == nBlockLength1,
+           dtPasses[, length(unique(location1.bucket))] == 1 &
+           dtPasses[, length(unique(location2.bucket))] == 1,
            0,
            0.8
         ),
         color = ifelse(
-           nLocation1Size == nBlockLength1,
+           dtPasses[, length(unique(location1.bucket))] == 1 &
+           dtPasses[, length(unique(location2.bucket))] == 1,
            '#222222',
            NA
         ),
         size = ifelse(
-           nLocation1Size == nBlockLength1,
+           dtPasses[, length(unique(location1.bucket))] == 1 &
+           dtPasses[, length(unique(location2.bucket))] == 1,
            3,
            0
         )
@@ -1041,29 +1140,72 @@ lMatches = lapply(
 ```{r, Charts, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
 
 plotPitchBreakupSonar = fPlotSonar (
-   dtPassesToPlot = lMatches[['69334']]$Pass,
+   dtPassesToPlot = lMatches[[1]]$Pass[,
+      list(
+         location1,
+         location2,
+         pass.angle,
+         pass.length,
+         pass.outcome.name,
+         location1.bucket = (
+            ifelse(
+               location1 %/% 20 == nLocation1Size %/% 20,
+               ( location1 %/% 20 ) - 1,
+               location1 %/% 20
+            ) * 20
+         ) + 10,
+         location2.bucket = ( 
+            ifelse(
+               location2 %/% 20 == nLocation2Size %/% 20,
+               ( location2 %/% 20 ) - 1,
+               location2 %/% 20
+            ) * 20
+         ) + 10
+      )
+   ],
    iBlocksInFirstRing = 4,
    iNbrRings = 8,
    nLocation2Size = 80,
    nLocation1Size = 120,
-   nBlockLength1 = 20,
-   nBlockLength2 = 20,
    bAddPitchBackground = T,
    cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
 )
 
 
-plotOverallSonar = fPlotSonar (
-   dtPassesToPlot = lMatches[['69334']]$Pass,
+plotPlayerBreakupSonar = fPlotSonar (
+   dtPassesToPlot = merge(
+      lMatches[[1]]$Pass,
+      lMatches[[1]]$Starting.XI[, list(match_id, team.id, player.id, location1.bucket = location1, location2.bucket = location2)],
+      c('match_id','team.id','player.id')
+   ),
    iBlocksInFirstRing = 4,
    iNbrRings = 8,
    nLocation2Size = 80,
    nLocation1Size = 120,
-   nBlockLength1 = NULL,
-   nBlockLength2 = NULL,
+   bAddPitchBackground = T,
+   cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
+)
+
+plotOverallSonar = fPlotSonar (
+   dtPassesToPlot = lMatches[[1]]$Pass[,
+      list(
+         location1,
+         location2,
+         pass.angle,
+         pass.length,
+         pass.outcome.name,
+         location1.bucket = nLocation1Size / 2,
+         location2.bucket = nLocation2Size / 2
+      )
+   ],
+   iBlocksInFirstRing = 4,
+   iNbrRings = 8,
+   nLocation2Size = 80,
+   nLocation1Size = 120,
    bAddPitchBackground = F,
    cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
 )
+
 
 
 ```
@@ -1092,6 +1234,25 @@ plotPitchBreakupSonar = plotPitchBreakupSonar +
       ymax = 0,
       xmin = ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$x.range[2] - ( 2 * abs(ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$y.range[1]) * 1485 / 330 ),
       xmax = ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$x.range[2] - ( 1 * abs(ggplot_build(plotPitchBreakupSonar)$layout$panel_params[[1]]$y.range[1]) * 1485 / 330 )
+   )
+
+
+plotPlayerBreakupSonar = plotPlayerBreakupSonar + 
+   annotation_custom(
+      rasterStatsbombLogo,
+      ymin = ggplot_build(plotPlayerBreakupSonar)$layout$panel_params[[1]]$y.range[1],
+      ymax = 0,
+      xmin = ggplot_build(plotPlayerBreakupSonar)$layout$panel_params[[1]]$x.range[2] - ( abs(ggplot_build(plotPlayerBreakupSonar)$layout$panel_params[[1]]$y.range[1]) * 1485 / 330 ),
+      xmax = ggplot_build(plotPlayerBreakupSonar)$layout$panel_params[[1]]$x.range[2]
+   )
+
+plotPlayerBreakupSonar = plotPlayerBreakupSonar + 
+   annotation_custom(
+      rasterCredits,
+      ymin = ggplot_build(plotPlayerBreakupSonar)$layout$panel_params[[1]]$y.range[1],
+      ymax = 0,
+      xmin = ggplot_build(plotPlayerBreakupSonar)$layout$panel_params[[1]]$x.range[2] - ( 2 * abs(ggplot_build(plotPlayerBreakupSonar)$layout$panel_params[[1]]$y.range[1]) * 1485 / 330 ),
+      xmax = ggplot_build(plotPlayerBreakupSonar)$layout$panel_params[[1]]$x.range[2] - ( 1 * abs(ggplot_build(plotPlayerBreakupSonar)$layout$panel_params[[1]]$y.range[1]) * 1485 / 330 )
    )
 
 
@@ -1135,6 +1296,16 @@ if ( F ) {
       dpi = 450
    )
    
+   # this takes veeeeeeeery long
+   ggsave(
+      plot = plotPlayerBreakupSonar,
+      filename = 'plotPlayerBreakupSonar.png', 
+      width = 320, 
+      height = 237, 
+      units = 'mm',
+      dpi = 450
+   )
+   
 }
 
 ```
@@ -1145,5 +1316,6 @@ if ( F ) {
 
 knitr::include_graphics("./plotOverallSonar.png")
 knitr::include_graphics("./plotPitchBreakupSonar.png")
+knitr::include_graphics("./plotPlayerBreakupSonar.png")
 
 ```

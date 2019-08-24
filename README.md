@@ -88,4 +88,4 @@ we’re going to have to stick to sonar.
 
 ( opening images in a new tab by themselves might be a better view )
 
-<img src="./plotOverallSonar.png" width="1500" /><img src="./plotPitchBreakupSonar.png" width="1500" />
+<img src="./plotOverallSonar.png" width="1500" /><img src="./plotPitchBreakupSonar.png" width="1500" /><img src="./plotPlayerBreakupSonar.png" width="1500" />
