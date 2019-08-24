@@ -286,7 +286,8 @@ fJsonToListOfTables = function (
                   )
                ),
                c('team.id','position.name'),
-               suffixes = c('','.new')
+               suffixes = c('','.new'),
+               all.x = T
             )
             
             lEvents[[iEventIndex]][is.na(location1), location1 := location1.new]
@@ -341,7 +342,8 @@ fJsonToListOfTables = function (
                   )
                ),
                c('team.id','position.name'),
-               suffixes = c('','.new')
+               suffixes = c('','.new'),
+               all.x = T
             )
             
             lEvents[[iEventIndex]][is.na(location1), location1 := location1.new]
@@ -1202,7 +1204,7 @@ plotPitchBreakupSonar = fPlotSonar (
    nLocation2Size = 80,
    nLocation1Size = 120,
    bAddPitchBackground = T,
-   cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
+   cTitle = 'Barcelona passes vs. Real Madrid, Santiago Bernabéu, La Liga, 2011/12'
 )
 
 
@@ -1222,7 +1224,7 @@ plotPlayerBreakupSonar = fPlotSonar (
    nLocation2Size = 80,
    nLocation1Size = 120,
    bAddPitchBackground = T,
-   cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
+   cTitle = 'Barcelona passes vs. Real Madrid, Santiago Bernabéu, La Liga, 2011/12'
 )
 
 plotOverallSonar = fPlotSonar (
@@ -1242,7 +1244,7 @@ plotOverallSonar = fPlotSonar (
    nLocation2Size = 80,
    nLocation1Size = 120,
    bAddPitchBackground = F,
-   cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
+   cTitle = 'Barcelona passes vs. Real Madrid, Santiago Bernabéu, La Liga, 2011/12'
 )
 
 
@@ -1353,9 +1355,9 @@ if ( F ) {
 
 ```{r, ChartRenders, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, out.width = 1500, results = 'asis'}
 
-knitr::include_graphics("./plotOverallSonar.png")
-knitr::include_graphics("./plotPitchBreakupSonar.png")
-knitr::include_graphics("./plotPlayerBreakupSonar.png")
+knitr::include_graphics("./69334.217/plotOverallSonar.png")
+knitr::include_graphics("./69334.217/plotPitchBreakupSonar.png")
+knitr::include_graphics("./69334.217/plotPlayerBreakupSonar.png")
 
 ```
 

@@ -88,7 +88,7 @@ we’re going to have to stick to sonar.
 
 ( opening images in a new tab by themselves might be a better view )
 
-<img src="./plotOverallSonar.png" width="1500" /><img src="./plotPitchBreakupSonar.png" width="1500" /><img src="./plotPlayerBreakupSonar.png" width="1500" />
+<img src="./69334.217/plotOverallSonar.png" width="1500" /><img src="./69334.217/plotPitchBreakupSonar.png" width="1500" /><img src="./69334.217/plotPlayerBreakupSonar.png" width="1500" />
 
 ### How you can make this for your data
 
@@ -114,5 +114,5 @@ report them on
 There are som todos sprinkled across the code. Useful to note, before
 making your own charts.
 
-Please give design credits back to thecomeonman. I haven't put a particular 
-license on this yet.
+Please give design credits back to thecomeonman. I haven’t put a
+particular license on this yet.
