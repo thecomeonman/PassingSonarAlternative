@@ -89,3 +89,30 @@ we’re going to have to stick to sonar.
 ( opening images in a new tab by themselves might be a better view )
 
 <img src="./plotOverallSonar.png" width="1500" /><img src="./plotPitchBreakupSonar.png" width="1500" /><img src="./plotPlayerBreakupSonar.png" width="1500" />
+
+### How you can make this for your data
+
+The code is in R, in the Readme.Rmd file.
+
+Edit the self-explanatory variables in the Setup chunk. You may not have
+the watermark images in which case you can skip the watermarks chunk.
+
+The position coordinates for the formations for a 4-3-3 and a 3-5-1-1
+are available in the code but you will need to add these for your
+positions. ctrl + F for 3511 and add your formation details there.
+
+The dimensions of the final image affect the size of the text. For the
+pitch break up and the overall sonar, just use the settings I use. For
+the player split, depending on the formation the dimensions may change a
+little bit. I don’t know of a good way to control this.
+
+The fPlotSonar function has been tried with only these three
+configurations. Any experiments may yield bugs in the logic. Please
+report them on
+<a href="https://github.com/thecomeonman/PassingSonarAlternative" class="uri">https://github.com/thecomeonman/PassingSonarAlternative</a>.
+
+There are som todos sprinkled across the code. Useful to note, before
+making your own charts.
+
+Please give design credits back to thecomeonman. I haven't put a particular 
+license on this yet.

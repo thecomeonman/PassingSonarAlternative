@@ -60,6 +60,9 @@ library(scales)
 library(rjson)
 
 vcMatchFileNames = '/home/ask/Documents/open-data/data/events/69324.json'
+cCreditsImageFilePath = '/home/ask/Pictures/Screenshot from 2019-08-21 08-08-08.png'
+cStatsbombLogoFilePath = '/home/ask/Documents/open-data/stats-bomb-logo.png'
+
 vcTagsToExtract = c("Starting XI",'Pass')
 nLocation2Size = 80
 nLocation1Size = 120
@@ -232,6 +235,7 @@ fJsonToListOfTables = function (
          
       }
       
+      # todo - add all formations
       if ( names(lEvents)[iEventIndex] == 'Starting XI' ) {
       
          # Attaching formation position details
@@ -738,6 +742,8 @@ fPlotSonar = function (
    # (-length,length).
    # The pitch will be extended to nZoomFactor the dimensions to 
    # accommodate all the sonars.
+   # todo - this needs a more sophisticated calculation. In case use is
+   # looking at a smaller area, this calculation may yiel the wrong number
    nZoomFactor = ceiling(
       max(
          dtPasses[, length(unique(location1.bucket))], 
@@ -745,6 +751,7 @@ fPlotSonar = function (
          ( nLocation1Size * dtPasses[, length(unique(location2.bucket)), location1.bucket][, max(V1)] ) / nLocation2Size
       )
    ) 
+   
    nZoomFactor = nZoomFactor * 2 *  1.1
    
    # Length bucket number. The bucket number, and not the bucket, is needed
@@ -1013,7 +1020,34 @@ fPlotSonar = function (
         color = 'black',
         size = 0.1
         # alpha = 0.8
-      ) +
+      )
+   
+   if ( 'location.bucket.label' %in% colnames(dtPasses) ) {
+      
+      p1 = p1 +
+         geom_text(
+            data = dtPasses[, 
+               list(
+                  location.bucket.label = location.bucket.label[1]
+               ), 
+               list(
+                  location1.bucket = location1.bucket * nZoomFactor, 
+                  location2.bucket = location2.bucket * nZoomFactor
+               )
+            ],
+            aes(
+               x = location1.bucket,
+               y = location2.bucket - ( nLocation1Size * 1.1 ),
+               label = location.bucket.label
+            ),
+            hjust = 0.5,
+            vjust = 0.5,
+            color = 'white'
+         )
+      
+   }
+   
+   p1 = p1 +
       scale_fill_gradient2(
          # low = '#89cff0',
          # low = '#0070bb',
@@ -1175,7 +1209,12 @@ plotPitchBreakupSonar = fPlotSonar (
 plotPlayerBreakupSonar = fPlotSonar (
    dtPassesToPlot = merge(
       lMatches[[1]]$Pass,
-      lMatches[[1]]$Starting.XI[, list(match_id, team.id, player.id, location1.bucket = location1, location2.bucket = location2)],
+      lMatches[[1]]$Starting.XI[, 
+         list(
+            match_id, team.id, player.id, 
+            location.bucket.label = player.name, location1.bucket = location1, location2.bucket = location2
+         )
+      ],
       c('match_id','team.id','player.id')
    ),
    iBlocksInFirstRing = 4,
@@ -1211,11 +1250,11 @@ plotOverallSonar = fPlotSonar (
 ```
 
 ```{r, Watermarks, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
-
-pngStatsbombLogo = readPNG('/home/ask/Documents/open-data/stats-bomb-logo.png') 
+   
+pngStatsbombLogo = readPNG(cStatsbombLogoFilePath)
 rasterStatsbombLogo <- rasterGrob(pngStatsbombLogo, interpolate=TRUE)
 
-pngCredits = readPNG('/home/ask/Pictures/Screenshot from 2019-08-21 08-08-08.png') 
+pngCredits = readPNG(cCreditsImageFilePath) 
 rasterCredits <- rasterGrob(pngCredits, interpolate=TRUE)
 
 plotPitchBreakupSonar = plotPitchBreakupSonar + 
@@ -1319,3 +1358,29 @@ knitr::include_graphics("./plotPitchBreakupSonar.png")
 knitr::include_graphics("./plotPlayerBreakupSonar.png")
 
 ```
+
+### How you can make this for your data
+
+The code is in R, in the Readme.Rmd file. 
+
+Edit the self-explanatory variables in the Setup chunk. You may not have the
+watermark images in which case you can skip the watermarks chunk.
+
+The position coordinates for the formations for a 4-3-3 and a 3-5-1-1 are 
+available in the code but you will need to add these for your positions. 
+ctrl + F for 3511 and add your formation details there.
+
+The dimensions of the final image affect the size of the text. For the pitch
+break up and the overall sonar, just use the settings I use. For the player
+split, depending on the formation the dimensions may change a little bit. I 
+don't know of a good way to control this.
+
+The fPlotSonar function has been tried with only these three configurations.
+Any experiments may yield bugs in the logic. Please report them on 
+https://github.com/thecomeonman/PassingSonarAlternative.
+
+There are som todos sprinkled across the code. Useful to note, before making
+your own charts.
+
+Please give design credits back to thecomeonman. I haven't put a particular 
+license on this yet. 
