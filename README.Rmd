@@ -41,6 +41,11 @@ The <a href = "https://statsbomb.com/2019/07/a-sneak-peak-at-iq-tactics-a-brief-
 
 - Each block is calculated in such a way that it covers approximately the same area as all other blocks which allows us to compare blocks and get an idea of which parts of the pitch received more passes and which parts received less.
 
+### Passing Cobblestone Circles
+
+... is what come to mind but it's unlikely to be a name that catches on so we're going to have to stick to sonar. 
+
+![](https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/Paver_Blocks_Exterior_Circular_3008px.jpg/1920px-Paver_Blocks_Exterior_Circular_3008px.jpg)
 
 ```{r Setup, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
 
@@ -52,9 +57,188 @@ library(gridExtra)
 library(grid)
 library(gtable)
 library(scales)
+library(rjson)
 
+vcMatchFileNames = '/home/ask/Documents/open-data/data/events/69334.json'
+vcTagsToExtract = c("Starting XI",'Pass')
 nLocation2Size = 80
 nLocation1Size = 120
+
+```
+
+```{r DataIngestionFunctions, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+
+fJsonToTabular = function(
+   lEvent
+) {
+
+   dtEvent = data.table(
+      t(unlist(lEvent))
+   )
+
+   vcNewColnames = colnames(dtEvent)
+   
+   vcNewColnames = sapply(
+      seq(length(vcNewColnames)),
+      function ( iNewColnameIndex ) {
+         
+         cNewColname = vcNewColnames[iNewColnameIndex]
+         
+         if ( 
+            sum(
+               cNewColname == vcNewColnames[1:iNewColnameIndex]
+            ) > 1
+         ) {
+            
+            cNewColname = paste0(
+               cNewColname,
+               '.',
+               formatC(
+                  width = 2,
+                  flag = '0',
+                  sum(
+                     cNewColname == vcNewColnames[1:iNewColnameIndex]
+                  )
+               )
+            )
+            
+         }
+         
+         cNewColname
+         
+      }
+   )
+
+   setnames(
+      dtEvent,
+      vcNewColnames
+   )
+
+}
+
+
+
+fJsonToListOfTables = function (
+   lMatchJson,
+   vcTagsToExtract
+) {
+   
+   lEvents = list()
+   
+   for ( lEvent in lMatchJson ) {
+   
+      if ( lEvent$type$name %in% vcTagsToExtract ) {
+   
+         if ( lEvent$type$name %in% 'Starting XI') {
+            
+            dtEvent = rbindlist(
+               lapply(
+                  lEvent[['tactics']][['lineup']],
+                  function (lEvent) {
+                        
+                     fJsonToTabular(
+                        lEvent
+                     )
+                  
+                  }
+               )
+            )
+                     
+            
+            lEvent[['tactics']][['lineup']] = NULL
+            
+         }
+         
+         dtEventMore = fJsonToTabular(
+            lEvent
+         ) 
+         
+         if ( exists('dtEvent')) {
+         
+            dtEvent = cbind(
+               dtEvent,
+               dtEventMore
+            )
+            
+         } else {
+            
+            dtEvent = dtEventMore
+            
+         }
+         
+         rm(dtEventMore)
+         
+         lEvents[[lEvent$type$name]][[length(lEvents[[lEvent$type$name]]) + 1]] = dtEvent
+         
+         rm(lEvent)
+         rm(dtEvent)
+         
+      }
+      
+   }
+   
+   
+   for ( iEventIndex in seq(length(lEvents)) ) {
+
+      # print(iEventIndex)
+
+      lEvents[[iEventIndex]] = rbindlist(lEvents[[iEventIndex]], fill = T)
+      
+      for ( i in grep(colnames(lEvents[[iEventIndex]]), pattern = 'location1', value = T) ) {
+
+         lEvents[[iEventIndex]][, i := as.numeric(as.character(get(i)))]
+         setnames(
+            lEvents[[iEventIndex]],
+            i,
+            'delete'
+         )
+         setnames(
+            lEvents[[iEventIndex]],
+            'i',
+            i
+         )
+         lEvents[[iEventIndex]][, delete := NULL]
+
+      }
+
+      for ( i in grep(colnames(lEvents[[iEventIndex]]), pattern = 'location2', value = T) ) {
+
+         lEvents[[iEventIndex]][, i := nLocation2Size - as.numeric(as.character(get(i)))]
+         setnames(
+            lEvents[[iEventIndex]],
+            i,
+            'delete'
+         )
+         setnames(
+            lEvents[[iEventIndex]],
+            'i',
+            i
+         )
+         lEvents[[iEventIndex]][, delete := NULL]
+
+      }
+      
+      if ( names(lEvents)[iEventIndex] == 'Pass' ) {
+         
+         lEvents[[iEventIndex]][, pass.angle := as.numeric(as.character(pass.angle))]
+         lEvents[[iEventIndex]][, pass.length := as.numeric(as.character(pass.length))]
+   
+         # 0 points from defense to offense
+         # pi / 2 points from centre to left
+         # -pi / 2 or 3pi / 2 points from centre to right
+         lEvents[[iEventIndex]][, pass.angle := -pass.angle]
+         
+      }
+
+   }
+   
+   names(lEvents) = make.names(names(lEvents))
+   
+   lEvents
+   
+}
+
 
 ```
 
@@ -366,12 +550,52 @@ theme_pitch <- function () {
 
 }
 
+# Draws a block based on the angle bucket and length bucket, respectively 
+# indicated by x and y
+fCalculatePolygonCoordinate = function (
+   xmin2,
+   xmax2,
+   ymin2,
+   ymax2,
+   fTrigFunction
+) {
+   
+   c(
+      seq(
+         ymin2,
+         ymax2,
+         ( ymax2 - ymin2 ) / 50
+      ) * fTrigFunction(xmin2),
+      fTrigFunction(
+         seq(
+            xmin2,
+            xmax2,
+            ( xmax2 - xmin2 ) / 50
+         )
+      ) * ymax2,
+      seq(
+         ymax2,
+         ymin2,
+         ( ymin2 - ymax2 ) / 50
+      ) * fTrigFunction(xmax2),
+      fTrigFunction(
+         seq(
+            xmax2,
+            xmin2,
+            ( xmin2 - xmax2 ) / 50
+         )
+      ) * ymin2
+   )
+   
+}
 
+# This function has only been tested with 120 X 80 dimension dataset, in the 
+# two ways shown in the charts section. Any deviation from those may 
+# produce odd results.
 fPlotSonar = function (
    dtPassesToPlot,
-   iNbrLengthBins = 12,
    iBlocksInFirstRing = 4,
-   nPassLengthBreakGap = 15,
+   iNbrRings = 8,
    nLocation2Size = 80,
    nLocation1Size = 120,
    nBlockLength1 = NULL,
@@ -382,12 +606,20 @@ fPlotSonar = function (
    
    dtPasses = copy(dtPassesToPlot)
    
-   vnPassLengthBreaks = seq(0, nLocation1Size, nPassLengthBreakGap)
-   nPassAngleBreakGap = 2 * pi / iBlocksInFirstRing
-   vnPassAngleBreaks = seq(-pi, pi, nPassAngleBreakGap)
+   nIncremntalRingRadius = nLocation1Size / iNbrRings
+   
+   # A vector with the same length as the number of rings possible, with each
+   # element having the radius for that ring
+   vnPassLengthBreaks = seq(0, nLocation1Size, nIncremntalRingRadius)
+   
+   # Each ring, depepnding on the radius, will have different number of breaks
+   # to capture passes of the respective length but in a certain direction
+   # This logic calculates the number of breaks at each ring
    vnPiR2Difference = ( (tail(vnPassLengthBreaks, -1) ^ 2) - (head(vnPassLengthBreaks, -1) ^ 2) ) 
    viNbrAngleBreaks = round(vnPiR2Difference / ( vnPiR2Difference[1] / iBlocksInFirstRing ))
 
+   # If the data isn't being divided into blocks based on the origin of the 
+   # passes then assume all passes to be in the same block
    if ( is.null(nBlockLength1) ) {
       nBlockLength1 = nLocation1Size
    }
@@ -396,269 +628,202 @@ fPlotSonar = function (
       nBlockLength2 = nLocation2Size
    }
    
+   # The coordinates of the pitch will need to be extended to fit multiple
+   # sonars in it, since each sonar will individually have a span of 
+   # (-length,length).
+   # The pitch will be extended to nZoomFactor the dimensions to 
+   # accommodate all the sonars.
    nZoomFactor = ceiling(
       max(nLocation1Size / nBlockLength1, nLocation2Size / nBlockLength2)
    ) * 2 
    nZoomFactor = nZoomFactor * 1.1
    
-   
+   # Length bucket number. The bucket number, and not the bucket, is needed
+   # to calculate the angle buckets.
    dtPasses[, 
-      # pass.length.bucket := as.numeric(as.character(cut(pass.length, vnPassLengthBreaks, labels = (head(vnPassLengthBreaks, -1) + tail(vnPassLengthBreaks, -1))/2)))
-      pass.length.bucket := pass.length %/% nPassLengthBreakGap
+      pass.length.bucket := pass.length %/% nIncremntalRingRadius
    ]
    
+   # Angle buckets.
+   # Basically retrieving the number of angle buckets for the resepctive ring
+   # which are already calculated in viNbrAngleBreaks and labelling the
+   # data accordingly.
    dtPasses[, 
-      pass.angle.bucket := pass.angle %/% ( 2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] ),
+      pass.angle.bucket := pass.angle %/% ( 
+         2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] 
+      ),
       pass.length.bucket
    ]
    
-   dtPasses[
-      pass.angle.bucket == pi %/% ( 2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] ), 
-      pass.angle.bucket := pass.angle.bucket - 1
-   ]
-   
-   
+   # When angle is exactly 2pi, it falls into a bucket which has only 2*pi 
+   # angle passes. Forcing them to the previous bucket. Will live with this
+   # inconsistency.
+   # Not just comparing angle == 2pi because of precision affecting the result
+   # of that comparison
    dtPasses[, 
-      pass.angle.bucket.width := ( 2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] ), 
-      pass.length.bucket
-   ]
-   
-   dtPasses[, 
-      pass.angle.bucket := ( pass.angle.bucket + 0.5 ) * ( pass.angle.bucket.width )
-   ]
-   
-   dtPasses[, 
-      pass.length.bucket := ( pass.length.bucket + 0.5 ) * nPassLengthBreakGap, 
-      pass.length.bucket
-   ]
-   
-   
-   
-   dtPasses[,
-      location1.bucket := ( nBlockLength1 * ( location1 %/% nBlockLength1 ) ) + ( nBlockLength1 / 2 )
-   ]
-   
-   dtPasses[,
-      location2.bucket := ( nBlockLength2 * ( location2 %/% nBlockLength2 ) ) + ( nBlockLength2 / 2 )
-   ]
-   
-   p1 = ggplot(
-      dtPasses[
-         location1 < nLocation1Size &
-         location2 < nLocation2Size
-      ][
-         !is.na(pass.length.bucket) &
-         !is.na(pass.angle.bucket), 
-         list(
-            PassCount = .N, 
-            Success_pct = sum(is.na(pass.outcome.name)) / .N
+      pass.angle.bucket := ifelse(
+         pass.angle.bucket == ( 2 * pi) %/% (
+            2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ]
          ),
-         list(
-            location1.bucket,
-            location2.bucket,
-            pass.angle.bucket, 
-            pass.angle.bucket.width,
-            pass.length.bucket,
-            xmin = pass.angle.bucket - ( pass.angle.bucket.width / 2 ),
-            xmax = pass.angle.bucket + ( pass.angle.bucket.width / 2 ),
-            ymin = pass.length.bucket - ( nPassLengthBreakGap / 2 ),
-            ymax = pass.length.bucket + ( nPassLengthBreakGap / 2 )
+         pass.angle.bucket - 1,
+         pass.angle.bucket
+      ),
+      pass.length.bucket
+   ]
+   
+   dtPasses[, 
+      pass.angle.bucket.width := (
+         2 * pi / viNbrAngleBreaks[ 1 + pass.length.bucket ] 
+      ), 
+      pass.length.bucket
+   ]
+   
+   dtPasses[, 
+      pass.angle.bucket := ( pass.angle.bucket + 0.5 ) * pass.angle.bucket.width
+   ]
+   
+   # Calculating actual pass length buckets
+   dtPasses[, 
+      pass.length.bucket := ( pass.length.bucket + 0.5 ) * nIncremntalRingRadius, 
+      pass.length.bucket
+   ]
+   
+   # Marking the data for different sonars based on the input coordinates
+   dtPasses[,
+      location1.bucket := ( 
+         nBlockLength1 * ( location1 %/% nBlockLength1 ) 
+      ) + ( nBlockLength1 / 2 )
+   ]
+   
+   dtPasses[,
+      location2.bucket := ( 
+         nBlockLength2 * ( location2 %/% nBlockLength2 ) 
+      ) + ( nBlockLength2 / 2 )
+   ]
+   
+   # Preparing the polygons needed for various elements of the chart
+   dtAllShapes = dtPasses[
+      # Remove throws in, etc. otherwise they might show up beyond
+      # the touchlines.
+      location1 < nLocation1Size &
+      location2 < nLocation2Size
+   ][
+      # Some passes don't have this data
+      !is.na(pass.length.bucket) &
+      !is.na(pass.angle.bucket)
+   ][, 
+      list(
+         PassCount = .N, 
+         Success_pct = sum(is.na(pass.outcome.name)) / .N
+      ),
+      list(
+         location1.bucket,
+         location2.bucket,
+         pass.angle.bucket, 
+         pass.angle.bucket.width,
+         pass.length.bucket,
+         # the bucket values are defined at the centre of the respective
+         # dimension so the min and max span would need to be calcualted
+         xmin = pass.angle.bucket - ( pass.angle.bucket.width / 2 ),
+         xmax = pass.angle.bucket + ( pass.angle.bucket.width / 2 ),
+         ymin = pass.length.bucket - ( nIncremntalRingRadius / 2 ),
+         ymax = pass.length.bucket + ( nIncremntalRingRadius / 2 )
+      )
+   ]
+   
+   # Changing the dimensions of the block based on the number of passes 
+   # in that block such that the outer boundary extends all the way to the max
+   # radius the ring permits and the inner radius is moved
+   dtAllShapes[,
+      ymin2 := pass.length.bucket + 
+        ( nIncremntalRingRadius * 1 / 2 ) - 
+        ( nIncremntalRingRadius * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) )
+   ][,
+      ymax2 := pass.length.bucket + ( nIncremntalRingRadius * 1 / 2 )
+   ][,
+      xmin2 := pass.angle.bucket - ( pass.angle.bucket.width * 1 / 2 )
+   ][,
+      xmax2 := pass.angle.bucket + ( pass.angle.bucket.width * 1 / 2 )
+   ]
+   
+   
+   # Changed both height and width of the block
+   # dtAllShapes[,
+   #    xmin2 := pass.angle.bucket - ( pass.angle.bucket.width * sqrt( PassCount / max(PassCount) ) / 2 )
+   # ][,
+   #    xmax2 := pass.angle.bucket + ( pass.angle.bucket.width * sqrt( PassCount / max(PassCount) ) / 2 )
+   # ][,
+   #    ymin2 := pass.length.bucket - ( nIncremntalRingRadius * sqrt( PassCount / max(PassCount) ) / 2 )
+   # ][,
+   #    ymax2 := pass.length.bucket + ( nIncremntalRingRadius * sqrt( PassCount / max(PassCount) ) / 2 )
+   # ]
+   
+   # Changed width of the block and kept height constant
+   # dtAllShapes[,
+   #    ymin3 := pass.length.bucket - ( nIncremntalRingRadius * 1 / 2 )
+   # ][,
+   #    ymax3 := pass.length.bucket + ( nIncremntalRingRadius * 1 / 2 )
+   # ][,
+   #    xmin3 := pass.angle.bucket - ( pass.angle.bucket.width * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) / 2 )
+   # ][,
+   #    xmax3 := pass.angle.bucket + ( pass.angle.bucket.width * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) / 2 )
+   # ]
+   
+   # Going from the four corner coordinates to a set of points that trace out
+   # the entire block. Just the four coordinates would draw a quadrangle but
+   # we need an arced sort of a quadrangle which is why we need this.
+   dtAllShapes = dtAllShapes[,
+      list(
+         # The coordinates of the block, scaled for number of passes
+         x = fCalculatePolygonCoordinate (
+            xmin2,
+            xmax2,
+            ymin2,
+            ymax2,
+            fTrigFunction = cos
+         ),
+         y = fCalculatePolygonCoordinate (
+            xmin2,
+            xmax2,
+            ymin2,
+            ymax2,
+            fTrigFunction = sin
+         ),
+         # The coordinates of the black for the max area possible for it
+         # Can be used to add a boundary to blocks maybe.
+         xBound = fCalculatePolygonCoordinate (
+            xmin,
+            xmax,
+            ymin,
+            ymax,
+            fTrigFunction = cos
+         ),
+         yBound = fCalculatePolygonCoordinate (
+            xmin,
+            xmax,
+            ymin,
+            ymax,
+            fTrigFunction = sin
          )
-      ][,
-         ymin2 := pass.length.bucket + ( nPassLengthBreakGap * 1 / 2 ) - ( nPassLengthBreakGap * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) )
-      ][,
-         ymax2 := pass.length.bucket + ( nPassLengthBreakGap * 1 / 2 )
-      ][,
-      #    xmin2 := pass.angle.bucket - ( pass.angle.bucket.width * sqrt( PassCount / max(PassCount) ) / 2 )
-      # ][,
-      #    xmax2 := pass.angle.bucket + ( pass.angle.bucket.width * sqrt( PassCount / max(PassCount) ) / 2 )
-      # ][,
-      #    ymin2 := pass.length.bucket - ( nPassLengthBreakGap * ( PassCount / max(PassCount) ) / 2 )
-      # ][,
-      #    ymax2 := pass.length.bucket + ( nPassLengthBreakGap * ( PassCount / max(PassCount) ) / 2 )
-      # ][,
-         xmin2 := pass.angle.bucket - ( pass.angle.bucket.width * 1 / 2 )
-      ][,
-         xmax2 := pass.angle.bucket + ( pass.angle.bucket.width * 1 / 2 )
-      ][,
-         ymin3 := pass.length.bucket - ( nPassLengthBreakGap * 1 / 2 )
-      ][,
-         ymax3 := pass.length.bucket + ( nPassLengthBreakGap * 1 / 2 )
-      ][,
-         xmin3 := pass.angle.bucket - ( pass.angle.bucket.width * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) / 2 )
-      ][,
-         xmax3 := pass.angle.bucket + ( pass.angle.bucket.width * sqrt( PassCount / ( 1.2 * max(PassCount) ) ) / 2 )
-      ][,
-         list(
-            x = c(
-               seq(
-                  ymin2,
-                  ymax2,
-                  ( ymax2 - ymin2 ) / 50
-               ) * cos(xmin2),
-               cos(
-                  seq(
-                     xmin2,
-                     xmax2,
-                     ( xmax2 - xmin2 ) / 50
-                  )
-               ) * ymax2,
-               seq(
-                  ymax2,
-                  ymin2,
-                  ( ymin2 - ymax2 ) / 50
-               ) * cos(xmax2),
-               cos(
-                  seq(
-                     xmax2,
-                     xmin2,
-                     ( xmin2 - xmax2 ) / 50
-                  )
-               ) * ymin2
-            ),
-            y = c(
-               seq(
-                  ymin2,
-                  ymax2,
-                  ( ymax2 - ymin2 ) / 50
-               ) * sin(xmin2),
-               sin(
-                  seq(
-                     xmin2,
-                     xmax2,
-                     ( xmax2 - xmin2 ) / 50
-                  )
-               ) * ymax2,
-               seq(
-                  ymax2,
-                  ymin2,
-                  ( ymin2 - ymax2 ) / 50
-               ) * sin(xmax2),
-               sin(
-                  seq(
-                     xmax2,
-                     xmin2,
-                     ( xmin2 - xmax2 ) / 50
-                  )
-               ) * ymin2
-            ),
-            
-            x2 = c(
-               seq(
-                  ymin3,
-                  ymax3,
-                  ( ymax3 - ymin3 ) / 50
-               ) * cos(xmin3),
-               cos(
-                  seq(
-                     xmin3,
-                     xmax3,
-                     ( xmax3 - xmin3 ) / 50
-                  )
-               ) * ymax3,
-               seq(
-                  ymax3,
-                  ymin3,
-                  ( ymin3 - ymax3 ) / 50
-               ) * cos(xmax3),
-               cos(
-                  seq(
-                     xmax3,
-                     xmin3,
-                     ( xmin3 - xmax3 ) / 50
-                  )
-               ) * ymin3
-            ),
-            y2 = c(
-               seq(
-                  ymin3,
-                  ymax3,
-                  ( ymax3 - ymin3 ) / 50
-               ) * sin(xmin3),
-               sin(
-                  seq(
-                     xmin3,
-                     xmax3,
-                     ( xmax3 - xmin3 ) / 50
-                  )
-               ) * ymax3,
-               seq(
-                  ymax3,
-                  ymin3,
-                  ( ymin3 - ymax3 ) / 50
-               ) * sin(xmax3),
-               sin(
-                  seq(
-                     xmax3,
-                     xmin3,
-                     ( xmin3 - xmax3 ) / 50
-                  )
-               ) * ymin3
-            ),
-            xBound = c(
-               seq(
-                  ymin,
-                  ymax,
-                  ( ymax - ymin ) / 50
-               ) * cos(xmin),
-               cos(
-                  seq(
-                     xmin,
-                     xmax,
-                     ( xmax - xmin ) / 50 
-                  )
-               ) * ymax,
-               seq(
-                  ymax,
-                  ymin,
-                  ( ymin - ymax ) / 50
-               ) * cos(xmax),
-               cos(
-                  seq(
-                     xmax,
-                     xmin,
-                     ( xmin - xmax ) / 50
-                  )
-               ) * ymin
-            ),
-            yBound = c(
-               seq(
-                  ymin,
-                  ymax,
-                  ( ymax - ymin ) / 50
-               ) * sin(xmin),
-               sin(
-                  seq(
-                     xmin,
-                     xmax,
-                     ( xmax - xmin ) / 50 
-                  )
-               ) * ymax,
-               seq(
-                  ymax,
-                  ymin,
-                  ( ymin - ymax ) / 50
-               ) * sin(xmax),
-               sin(
-                  seq(
-                     xmax,
-                     xmin,
-                     ( xmin - xmax ) / 50 
-                  )
-               ) * ymin
-            )
-         ),
-        list(
-           location1.bucket = location1.bucket * nZoomFactor,
-           location2.bucket = location2.bucket * nZoomFactor,
-           PassCount,
-           Success_pct,
-           pass.angle.bucket,
-           pass.length.bucket
-        )
-      ]
+      ),
+      list(
+         # Moving the bucket coordinates so that they fit on the 
+         # stretched out pitch
+         location1.bucket = location1.bucket * nZoomFactor,
+         location2.bucket = location2.bucket * nZoomFactor,
+         PassCount,
+         Success_pct,
+         pass.angle.bucket,
+         pass.length.bucket
+      )
+   ]
+   
+   # Initialising plot
+   p1 = ggplot(
+      dtAllShapes
    )
    
+   # Adding a football pitch in the background.
    if ( bAddPitchBackground ) {
       
       p1 = fAddPitchLines(
@@ -669,55 +834,29 @@ fPlotSonar = function (
          cLineColour = '#333333'
       )
       
-   } 
+   } else {
    
-   if ( nLocation1Size == nBlockLength1 ) {
-      
-      p1 = p1 + 
-         geom_polygon(
-            data = dtPasses[
-               location1 < nLocation1Size &
-               location2 < nLocation2Size
-            ][,
-               list(
-                  # x = ( dtPasses[, max(pass.length.bucket)] + ( nPassLengthBreakGap / 2 ) ) * cos(seq(-pi, pi, pi / 10)),
-                  # y = ( dtPasses[, max(pass.length.bucket)] + ( nPassLengthBreakGap / 2 ) ) * sin(seq(-pi, pi, pi / 10))
-                  x = max( nLocation1Size, nLocation2Size ) * cos(seq(-pi, pi, pi / 50)),
-                  y = max( nLocation1Size, nLocation2Size ) * sin(seq(-pi, pi, pi / 50))
-               )
-            ],
-            aes(
-               x = x + ( nLocation1Size * nZoomFactor / 2 ),
-               y = y + ( nLocation2Size * nZoomFactor / 2)
-           ),
-           color = '#222222',
-           alpha = 0
-         ) +
-         coord_fixed()
+      # If the pitch isn't being added, then the coord_fixed will need to be 
+      # specified explicitly
+         
+      p1 = p1 + coord_fixed()
       
    }
    
+   
+   
+   # If it's only one sonar, i.e. not multiple blocks, then the background
+   # of the plot will need some distinction from the ring around the sonar
+   # Adding the background and ring around the sonar for that.
    p1 = p1 + 
-      # geom_rect(
-      #    aes(
-      #       xmin = 0,
-      #       xmax = 120 * nZoomFactor,
-      #       ymin = 0,
-      #       ymax = 80 * nZoomFactor,
-      #    ),
-      #    fill = 'black',
-      #    alpha = 0.5
-      # ) +
       geom_polygon(
          data = dtPasses[
             location1 < nLocation1Size &
             location2 < nLocation2Size
          ][,
             list(
-               # x = ( dtPasses[, max(pass.length.bucket)] + ( nPassLengthBreakGap / 2 ) ) * cos(seq(-pi, pi, pi / 10)),
-               # y = ( dtPasses[, max(pass.length.bucket)] + ( nPassLengthBreakGap / 2 ) ) * sin(seq(-pi, pi, pi / 10))
-               x = max( nLocation1Size, nLocation2Size ) * cos(seq(-pi, pi, pi / 10)),
-               y = max( nLocation1Size, nLocation2Size ) * sin(seq(-pi, pi, pi / 10))
+               x = max( nLocation1Size, nLocation2Size ) * cos(seq(-pi, pi, pi / 50)),
+               y = max( nLocation1Size, nLocation2Size ) * sin(seq(-pi, pi, pi / 50))
             ),
             list(
                location1.bucket = location1.bucket * nZoomFactor,
@@ -733,8 +872,25 @@ fPlotSonar = function (
             )
         ),
         fill = '#000000',
-        alpha = 0.8
-      ) +
+        alpha = ifelse(
+           nLocation1Size == nBlockLength1,
+           0,
+           0.8
+        ),
+        color = ifelse(
+           nLocation1Size == nBlockLength1,
+           '#222222',
+           NA
+        ),
+        size = ifelse(
+           nLocation1Size == nBlockLength1,
+           3,
+           0
+        )
+      )
+   
+   p1 = p1 +
+      # marking a centre point
       geom_point(
         aes(
             x = location1.bucket,
@@ -742,10 +898,7 @@ fPlotSonar = function (
         ),
         color = '#000000'
       ) +
-      # geom_point(
-      #    data = dtPasses,
-      #    aes(x = pass.angle, y = pass.length)
-      # ) +
+      # passing block
       geom_polygon(
         aes(
             x = x + location1.bucket,
@@ -762,40 +915,6 @@ fPlotSonar = function (
         size = 0.1
         # alpha = 0.8
       ) +
-      # geom_polygon(
-      #   aes(
-      #       x = x2 + location1.bucket,
-      #       y = y2 + location2.bucket,
-      #       fill = Success_pct,
-      #       group = paste0(
-      #          location1.bucket,
-      #          location2.bucket,
-      #          pass.angle.bucket,
-      #          pass.length.bucket
-      #       )
-      #   )
-      #   # color = 'black'
-      #   # alpha = 0.8
-      # ) +
-      # geom_polygon(
-      #   aes(
-      #       x = xBound + location1.bucket,
-      #       y = yBound + location2.bucket,
-      #       fill = Success_pct,
-      #       group = paste0(
-      #          location1.bucket,
-      #          location2.bucket,
-      #          pass.angle.bucket,
-      #          pass.length.bucket
-      #       )
-      #   ),
-      #   color = '#333333',
-      #   alpha = 0
-      # ) +
-      # geom_point(aes(x = pass.angle.bucket, y = pass.length.bucket, size = PassCount, color = Success_pct)) +
-      # geom_vline(xintercept = vnPassAngleQuantiles) +
-      # geom_hline(yintercept = vnPassLengthQuantiles) +
-      # scale_color_continuous(high = 'white', low = 'red', guide = 'none') +
       scale_fill_gradient2(
          # low = '#89cff0',
          # low = '#0070bb',
@@ -810,11 +929,11 @@ fPlotSonar = function (
          guide = 'none',
          limits = c(0, 1)
       ) +
-      # scale_fill_continuous(high = 'white', low = 'red', name = 'Success %', labels = percent, limits = c(0, 1), guide = 'none' ) +
-      # coord_polar()
-      theme_pitch() +
+      # To prevent gaps around the edges of the blot
       scale_x_continuous(expand=c(0,0)) +
       scale_y_continuous(expand=c(0,0)) +
+      # aesthetic adjustments
+      theme_pitch() +
       theme(
          plot.background = element_rect(fill = '#000000', color = NA),
          panel.background = element_rect(fill = '#000000', color = NA),
@@ -825,6 +944,7 @@ fPlotSonar = function (
          legend.title = element_text(colour = 'white'),
          title = element_text(size = 14, colour = 'white')
       ) +
+      # supporting text
       labs(
          title = cTitle,
          subtitle = paste0(
@@ -833,10 +953,6 @@ fPlotSonar = function (
          )
       )
    
-   # p1 <- ggplot_gtable(ggplot_build(p1))
-   # p1$layout$clip[p1$layout$name=="panel"] <- "off"
-   
-   # grid.draw(p1)
    p1
 
 }
@@ -847,40 +963,100 @@ fPlotSonar = function (
 
 ```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
 
-load("/media/ask/Data/Personal/Projects/Personal/Messi_Statsbomb/ProcessedData/69324/Pass.Rdata")
-dtPasses = dtEvent[, list(id, index, team.id, team.name, player.id, player.name, pass.length, pass.angle, pass.outcome.name, location1, location2, pass.end_location1, pass.end_location2)]
-rm(dtEvent)
-dtPasses = dtPasses[team.id == 217]
+lMatches = lapply(
+   vcMatchFileNames,
+   function ( cMatchFileName ) {
+         
+      lMatchJson = fromJSON(file = cMatchFileName)
+   
+      lEvents = fJsonToListOfTables (
+         lMatchJson,
+         vcTagsToExtract
+      ) 
+      
+      lEvents = lapply(
+         lEvents,
+         function ( dtEvents ) {
+            
+            dtEvents[, 
+               match_id := gsub(
+                  x = gsub(
+                     x = cMatchFileName,
+                     pattern = '\\.json',
+                     replacement = ''
+                  ),
+                  pattern = '.*\\/',
+                  replacement = ''
+               )
+            ]
+            
+         }
+      )
+      
+      lEvents
+      
+   }
+   
+)
 
-dtPasses[, pass.angle := as.numeric(as.character(pass.angle))]
-dtPasses[, pass.length := as.numeric(as.character(pass.length))]
-dtPasses[, location1 := as.numeric(as.character(location1))]
-dtPasses[, location2 := as.numeric(as.character(location2))]
-dtPasses[, pass.angle := -pass.angle]
+names(lMatches) = gsub(
+   x = gsub(
+      x = vcMatchFileNames,
+      pattern = '\\.json',
+      replacement = ''
+   ),
+   pattern = '.*\\/',
+   replacement = ''
+)
+
+# filtering out Barcelona performances
+lMatches = lapply(
+   lMatches,
+   function( lMatch ) {
+      
+      lapply(
+         lMatch,
+         function ( dtEvent ) {
+            
+            dtEvent = dtEvent[team.id == 217]
+            
+         }
+      )
+   }
+)
+
+# dtPasses = dtEvent[, 
+#    list(
+#       # optional
+#       id, index, team.id, team.name, player.id, player.name, pass.end_location1, pass.end_location2, 
+#       # mandatory
+#       pass.length, pass.angle, location1, location2, pass.outcome.name
+#    )
+# ]
+# rm(dtEvent)
+
 
 ```
 
 ```{r, Charts, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
 
 plotPitchBreakupSonar = fPlotSonar (
-   dtPassesToPlot = dtPasses,
-   iNbrLengthBins = 12,
+   dtPassesToPlot = lMatches[['69334']]$Pass,
    iBlocksInFirstRing = 4,
-   # vnPassLengthQuantiles = quantile(dtPasses[, pass.length], (0:iNbrLengthBins)/iNbrLengthBins),
-   # vnPassAngleQuantiles = quantile(dtPasses[, pass.angle], (0:iBlocksInFirstRing)/iBlocksInFirstRing),
-   # nPassLengthBreakGap = dtPasses[, max(pass.length, na.rm = T)] / iNbrLengthBins,
-   nPassLengthBreakGap = 15,
+   iNbrRings = 8,
+   nLocation2Size = 80,
+   nLocation1Size = 120,
    nBlockLength1 = 20,
    nBlockLength2 = 20,
+   bAddPitchBackground = T,
    cTitle = 'Barcelona passes vs. Real Madrid, Nou Camp, La Liga, 2011/12'
 )
 
 
 plotOverallSonar = fPlotSonar (
-   dtPassesToPlot = dtPasses,
-   iNbrLengthBins = 12,
+   dtPassesToPlot = lMatches[['69334']]$Pass,
    iBlocksInFirstRing = 4,
-   nPassLengthBreakGap = 15,
+   iNbrRings = 8,
    nLocation2Size = 80,
    nLocation1Size = 120,
    nBlockLength1 = NULL,
@@ -943,7 +1119,7 @@ if ( F ) {
    ggsave(
       plot = plotOverallSonar,
       filename = 'plotOverallSonar.png', 
-      width = 273, 
+      width = 285, 
       height = 300, 
       dpi = 450,
       units = 'mm'

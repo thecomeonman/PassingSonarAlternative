@@ -79,6 +79,13 @@ article on passing sonars</a> prominently featured the below template -
     and get an idea of which parts of the pitch received more passes and
     which parts received less.
 
+### Passing Cobblestone Circles
+
+… is what come to mind but it’s unlikely to be a name that catches on so
+we’re going to have to stick to sonar.
+
+![](https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/Paver_Blocks_Exterior_Circular_3008px.jpg/1920px-Paver_Blocks_Exterior_Circular_3008px.jpg)
+
 ( opening images in a new tab by themselves might be a better view )
 
 <img src="./plotOverallSonar.png" width="1500" /><img src="./plotPitchBreakupSonar.png" width="1500" />
