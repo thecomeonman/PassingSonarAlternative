@@ -97,22 +97,48 @@ The code is in R, in the Readme.Rmd file.
 Edit the self-explanatory variables in the Setup chunk. You may not have
 the watermark images in which case you can skip the watermarks chunk.
 
-The position coordinates for the formations for a 4-3-3 and a 3-5-1-1
-are available in the code but you will need to add these for your
-positions. ctrl + F for 3511 and add your formation details there.
+The ChartFunctions chunk need not be modified in any way.
+
+The data chunk reads one of the Statsbomb files and structures that data
+in a manner that can be passed to the functions. In essence, it makes
+two datasets: - Passing data, stored as `lMatches[[1]]$Pass` which is a
+table with the columns - match\_id, team.id, player.id, location1 (
+which is along the length of the pitch, normalised between 0 and 120, )
+location2 ( which is along the width of teh pitch, normalised between 0
+and 80, ) pass.length, pass.angle ( which goes from 0 to 2 pi where 0
+points from defense to offense, and pi/2 points from centre to left, )
+and pass.outcome.name ( which is `NA` for successful passes and some
+non-NA value for unsuccessful passes ) - Formation data, stored as
+`lMatches[[1]]$Starting.XI`, which is a table with the columns -
+match\_id, team.id, player.id, player.name, location1 ( the location
+along the length of the pitch correponding to the player’s role in the
+formation, ) and location2 ( the location along the width of the pitch
+correponding to the player’s role in the formation, ) The position
+coordinates for the formations for a 4-3-3 and a 3-5-1-1 are available
+in the code but you will need to add these for your positions. ctrl + F
+for 3511 and add your formation details there.
+
+If you have some other data source but can create two tables in the same
+structure as above, you should be good to go.
 
 The dimensions of the final image affect the size of the text. For the
 pitch break up and the overall sonar, just use the settings I use. For
 the player split, depending on the formation the dimensions may change a
-little bit. I don’t know of a good way to control this.
+little bit. That’s why I save the image and laod them, instead of
+rendering them directly. I don’t know of a good way to control this.
 
 The fPlotSonar function has been tried with only these three
-configurations. Any experiments may yield bugs in the logic. Please
-report them on
-<a href="https://github.com/thecomeonman/PassingSonarAlternative" class="uri">https://github.com/thecomeonman/PassingSonarAlternative</a>.
+configurations. Any experiments may yield bugs in the logic.
 
 There are som todos sprinkled across the code. Useful to note, before
 making your own charts.
 
-Please give design credits back to thecomeonman. I haven’t put a
-particular license on this yet.
+I haven’t put a particular license on this yet but non-commercial usage
+with credits for design to thecomeonman should be fine. Please get in
+touch with me for any other sort of usage.
+
+In case you have suggestions, bugs, etc. feel free to get in touch on
+<a 
+href="https://github.com/thecomeonman/PassingSonarAlternative">Github</a>
+or <a 
+href="twitter.com/thecomeonman">Twitter</a>.
